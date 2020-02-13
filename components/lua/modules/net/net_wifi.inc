@@ -367,6 +367,62 @@ static int lwifi_stop(lua_State* L) {
     return 0;
 }
 
+static int lwifi_radar(lua_State* L) {      
+    driver_error_t *error;
+    uint16_t count, i;
+    u8_t table = 0;
+    u8_t onlyData = 0;
+    char auth[13];
+    uint8_t rssi,segs;
+    mac_t * maclist;
+
+    if (lua_gettop(L) >=4){
+       luaL_checktype(L, -1, LUA_TBOOLEAN);
+       if (lua_toboolean(L, -1)) {
+            onlyData = 1;
+       }
+       if(lua_isnumber(L, -2)){
+	       rssi=lua_tointeger(L,-2);
+	       printf("Minimum rssi: %d \n",rssi) ;
+       }
+       if(lua_isnumber(L, -3)){
+	       segs=lua_tointeger(L,-3);
+	       printf("Seconds per channel: %d\n",segs) ;
+       }
+       luaL_checktype(L, -4, LUA_TBOOLEAN);
+       if (lua_toboolean(L, -4)) {
+            table = 1;
+       }
+    } 
+    else{
+    printf("syntax is radar(returnTable,listening seconds per channel,min rssi,onlyDataPackets)"); 
+    }
+    // Scan wifi
+    if ((error = wifi_radar(&rssi, &maclist,&count,segs,onlyData))) {
+        return luaL_driver_error(L, error);
+    }
+    printf("%d devices founded \n",count);
+
+    if (table){
+	    lua_createtable(L, count, 0);
+	    for ( i = 0; i < count; i++) {     
+		       char * macl =  (char*)maclist[i].mac;
+		       printf("  list[%d] = %s\n", i,macl); 
+		       lua_pushstring(L, (char *)maclist[i].mac);
+		       lua_rawseti(L,-2,i+1); 
+		}
+    } else {
+	    lua_pushinteger(L, count);
+    }
+    printf("----\n");
+    lua_replace(L,1);
+    lua_settop(L,1);
+    if (maclist) {
+        free(maclist);
+    }
+    return 1;
+}
+
 static int lwifi_stat(lua_State* L) {
     ifconfig_t info;
     driver_error_t *error;
@@ -559,6 +615,7 @@ static const LUA_REG_TYPE wifi_map[] = {
     { LSTRKEY( "start"      ),     LFUNCVAL( lwifi_start            ) },
     { LSTRKEY( "stop"       ),     LFUNCVAL( lwifi_stop             ) },
     { LSTRKEY( "stat"       ),     LFUNCVAL( lwifi_stat             ) },
+    { LSTRKEY( "radar"      ),     LFUNCVAL( lwifi_radar            ) },
 #if CONFIG_ESP32_WIFI_NVS_ENABLED
     // wps ssid+auth can only be stored to nvs
     // so if nvs is disabled, wps would have to be repeated on every boot

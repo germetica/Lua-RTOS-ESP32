@@ -769,4 +769,176 @@ driver_error_t *wifi_get_mac(uint8_t mac[6]) {
     return NULL;
 }
 
+char *mac2str(const unsigned char *mac,const signed rssi)
+{
+	static int bufno;
+	static char hexbuffer[4][50];
+	static const char hex[] = "0123456789ABCDEF";
+	char *buffer = hexbuffer[3 & ++bufno], *buf = buffer;
+	int i;
+
+	for (i = 0; i < 6; i++)
+	{
+		unsigned int val = *mac++;
+		*buf++ = hex[val >> 4];
+		*buf++ = hex[val & 0xf];
+	}
+	
+	char rssibuf[3];
+	sprintf(rssibuf,"%d",rssi);
+
+	*buf++ = '|';
+	for (i = 0; i < sizeof(rssibuf); i++)
+	{
+		*buf++ = rssibuf[i];
+	}
+
+	*buf = '\0';
+	return buffer;
+}
+
+void wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type)
+{
+	wifi_ieee80211_pkt_t *pkkt = ((wifi_promiscuous_pkt_t *)buf)->payload;
+	signed rssi = ((wifi_promiscuous_pkt_t *)buf)->rx_ctrl.rssi;
+	char *mac;
+	if (pkkt->to_ds==1 && pkkt->from_ds==0){
+		mac = strdup(mac2str(pkkt->addr2,rssi));	 
+	} else if (pkkt->to_ds==1 && pkkt->from_ds==1){
+		mac = strdup(mac2str(pkkt->addr4,rssi));
+	} else if (pkkt->to_ds==0 && pkkt->from_ds==1){	
+		mac = strdup(mac2str(pkkt->addr1,rssi));
+		char macipv4[7];
+		strncpy(macipv4,mac,6);
+		macipv4[6]='\0';
+		char macipv6[5];
+		strncpy(macipv6,mac,4);
+		macipv6[4]='\0';
+		// exclude mac if destination is broadcast
+		if (macCompare(mac,"FFFFFFFFFFFF")){
+			mac = NULL;	
+		// or multicast 
+		} else if (strcmp(macipv4,"01005E")==0 || strcmp(macipv6,"3333")==0 ) {
+			mac = NULL;
+		}
+	} else if (pkkt->to_ds==0 && pkkt->from_ds==0){
+		mac = strdup(mac2str(pkkt->addr2,rssi));
+	} else {
+		mac = NULL;
+	}
+
+	if (mac !=NULL && type!=WIFI_PKT_MISC && (rssimin<rssi) && !ListFindItem(maclist,mac,macCompare)){
+		ListAppend(maclist, (void*)mac, strlen(mac));
+		printf("Device found: %s \n",  ((char*)(maclist->last->content)));
+	}
+}
+
+int macCompare(void* a, void* b)
+{
+	char amac[13];
+	char bmac[13];
+	strncpy(amac,a,12);
+	strncpy(bmac,b,12);
+	amac[12]='\0';
+	bmac[12]='\0';
+	return strcmp(amac,bmac) == 0; 
+}
+
+static void initialize_nvs()
+{
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
+}
+
+driver_error_t *wifi_radar(uint8_t *minsen, mac_t* *list, uint16_t * count,int segs,u8_t onlyData) {
+    driver_error_t *error;
+    *count=0;
+    *list = NULL;
+    
+    rssimin = *minsen;
+
+    initialize_nvs();
+
+    // initialize wifi
+    if (status_get(STATUS_WIFI_INITED)) {
+        wifi_mode_t mode;
+        if ((error = wifi_check_error(esp_wifi_get_mode(&mode)))) return error;
+
+        if (WIFI_MODE_AP == mode) {
+            if(status_get(STATUS_WIFI_STARTED)) {
+                if ((error = wifi_check_error(esp_wifi_stop()))) return error;
+                status_set(0x00000000, STATUS_WIFI_STARTED);
+            }
+            status_set(0x00000000, STATUS_WIFI_INITED);
+        }
+    }
+
+    if (!status_get(STATUS_WIFI_INITED)) {
+        // Attach wifi driver
+        if ((error = wifi_init(WIFI_MODE_STA))) {
+            return error;
+        }
+    }
+
+    if (!status_get(STATUS_WIFI_STARTED)) {
+        // Start wifi
+        if ((error = wifi_check_error(esp_wifi_start()))) return error;
+        delay(10);
+    }
+
+    maclist = ListInitialize();
+    //set filter of prom packets
+
+    if (onlyData){
+    	wifi_promiscuous_filter_t filter = {
+		.filter_mask = WIFI_PROMIS_FILTER_MASK_DATA};
+	ESP_ERROR_CHECK(esp_wifi_set_promiscuous_filter(&filter));
+    } else {
+    	wifi_promiscuous_filter_t filter = {
+		.filter_mask = WIFI_PROMIS_FILTER_MASK_ALL};
+	ESP_ERROR_CHECK(esp_wifi_set_promiscuous_filter(&filter));
+    } 
+
+    ESP_ERROR_CHECK(esp_wifi_set_promiscuous_rx_cb(wifi_promiscuous_cb));
+    ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
+    
+    int i;
+    for (i = 1; i <14; i++)
+	{
+	     printf("channel %d \r\n\r\n -------------------- \r\n",i);
+             esp_wifi_set_channel(i, WIFI_SECOND_CHAN_NONE);
+             vTaskDelay(pdMS_TO_TICKS(segs*1000));	     
+	}
+    printf("end\r\n");
+
+    ListElement* current = NULL;
+    int size = maclist->count;
+    char * listt[size];
+
+    if (size>0){
+        int i=0;
+	while (ListNextElement(maclist, &current) != NULL){
+	     char * mac =  ((char*)(current->content));
+             listt[i]=malloc(22);
+             strcpy(listt[i],mac);
+             i++;
+	}
+        ListFree(maclist);
+
+       *list =(mac_t*) malloc(sizeof(listt));
+       memset(*list, '\0', sizeof(listt));
+       memcpy(*list,listt,sizeof(listt));       
+    }
+    *count = (unsigned int) size;
+
+    ESP_ERROR_CHECK(esp_wifi_set_promiscuous(false));
+    if ((error = wifi_check_error(esp_wifi_stop()))) return error;
+    if ((error = wifi_deinit())) return error;
+    return NULL;
+}
+
 #endif
