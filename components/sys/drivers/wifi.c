@@ -76,6 +76,41 @@
 #include <esp_smartconfig.h>
 #include <pthread.h>
 
+typedef struct
+{
+	unsigned version : 2;
+	unsigned type : 2;
+	unsigned subtype : 4;
+
+	unsigned to_ds : 1;
+	unsigned from_ds : 1;
+	unsigned more_frag : 1;
+	unsigned retry : 1;
+	unsigned power : 1;
+	unsigned more_data : 1;
+	unsigned wep : 1;
+	unsigned order : 1;
+
+	uint16_t duration_id;
+
+	uint8_t addr1[6];
+	uint8_t addr2[6];
+	uint8_t addr3[6];
+	uint16_t sequence_control;
+	uint8_t addr4[6];
+
+} wifi_ieee80211_pkt_t;
+
+typedef struct {
+    char * mac;
+} mac_t;
+
+#include "LinkedList.h"
+
+static List* maclist;
+static int8_t rssimin; 
+
+
 #define WIFI_LOG(...) syslog(LOG_DEBUG, __VA_ARGS__);
 
 // This macro gets a reference for this driver into drivers array

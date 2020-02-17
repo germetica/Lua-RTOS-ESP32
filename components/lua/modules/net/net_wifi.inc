@@ -47,6 +47,10 @@
 
 #if CONFIG_LUA_RTOS_LUA_USE_NET
 
+typedef struct {
+    char * mac
+} mac_t;
+
 #include <string.h>
 #include <stdio.h>
 #include <esp_wps.h>
