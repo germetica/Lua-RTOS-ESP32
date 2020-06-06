@@ -229,4 +229,10 @@
 #define CONFIG_LUA_RTOS_BOARD_SUBTYPE "OTA"
 #endif
 
+#if CONFIG_LUA_RTOS_FIRMWARE_sparkfun
+#define CONFIG_LUA_RTOS_FIRMWARE "sparkfun"
+#define CONFIG_LUA_RTOS_BOARD_TYPE "sparkfun"
+#define CONFIG_LUA_RTOS_BOARD_SUBTYPE ""
+#endif
+
 #endif

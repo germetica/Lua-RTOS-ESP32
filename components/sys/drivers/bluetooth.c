@@ -156,6 +156,23 @@ static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* param) 
 				// Get raw data
 				frame.len = scan_result->scan_rst.adv_data_len;
 				memcpy(frame.raw, scan_result->scan_rst.ble_adv, frame.len);
+				// INI Agregado: se asigna nuevo campo con BD_ADDR del dispositivo visto
+				memcpy(frame.bd_addr, scan_result->scan_rst.bda, 6);
+				  //DEBUG
+					//uint8_t *bda = frame.bd_addr; // BD_ADDR del emisor
+					//printf("[%s:%d] bd_addr: %x:%x:%x:%x:%x:%x (tipo: %d)\r\n", __FILE__, __LINE__,
+					//		bda[0],bda[1],bda[2],bda[3],bda[4],bda[5], scan_result->scan_rst.ble_addr_type);
+					//// Ref. func "esp_err_t esp_read_mac(uint8_t* mac, esp_mac_type_t type)":
+					//// https://github.com/espressif/esp-idf/blob/v3.0.9/components/esp32/include/esp_system.h
+					//// type: type of MAC address, 0:wifi station, 1:wifi softap, 2:bluetooth, 3:ethernet.
+					//uint8_t macEsteDisp[6];
+					//for (int _it=0; _it<4; _it++) {
+					//	esp_read_mac(macEsteDisp, _it);
+					//	printf("[%s:%d] %d: %x:%x:%x:%x:%x:%x\r\n", __FILE__, __LINE__, _it,
+					//			macEsteDisp[0],macEsteDisp[1],macEsteDisp[2],macEsteDisp[3],macEsteDisp[4],macEsteDisp[5]);
+					//}
+				  //DEBUG/
+				// FIN Agregado
 
 				bt_eddystone_decode(scan_result->scan_rst.ble_adv, scan_result->scan_rst.adv_data_len, &frame);
 				xQueueSend(queue, &frame, 0);

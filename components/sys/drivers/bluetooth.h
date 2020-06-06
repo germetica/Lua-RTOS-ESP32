@@ -95,6 +95,8 @@ typedef struct {
 			uint8_t url[100];
 		} eddystone_url;
 	} data;
+	
+	uint8_t bd_addr[6]; // Agregado: BD_ADDR del dispositivo emisor
 } bt_adv_frame_t;
 
 typedef void (*bt_scan_callback_t)(int, bt_adv_frame_t *);

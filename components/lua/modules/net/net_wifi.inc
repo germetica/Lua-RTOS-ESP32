@@ -371,38 +371,55 @@ static int lwifi_stop(lua_State* L) {
     return 0;
 }
 
+// Agregado: cabezal de wifi_radar para evitar warnings (para no agregarlo en drivers/wifi.h)
+// Implementación en components/sys/drivers/wifi.c
+driver_error_t *wifi_radar(int8_t *minsen, mac_t* *list, uint16_t * count,int segs,u8_t onlyData, uint8_t channel);
+
 static int lwifi_radar(lua_State* L) {      
     driver_error_t *error;
     uint16_t count, i;
     u8_t table = 0;
     u8_t onlyData = 0;
-    char auth[13];
-    uint8_t rssi,segs;
+    //char auth[13]; // No se usa
+    int8_t rssi; // el RSSI es con signo
+    uint8_t segs;
+    uint8_t channel = 0; // Canal a escanear (0 son todos)
     mac_t * maclist;
 
-    if (lua_gettop(L) >=4){
-       luaL_checktype(L, -1, LUA_TBOOLEAN);
-       if (lua_toboolean(L, -1)) {
+    if (lua_gettop(L) >=5){
+       // INI Agregado: nuevo parámetro con número de canal a escanear
+       //     Nota: Al agregar un elemento al tope del stack, a los índices siguientes
+       //     se les restó 1 (ahora es de -1 a -5, antes era de -1 a -4)
+       if (lua_isnumber(L, -1))
+            channel = lua_tointeger(L, -1);
+       if (channel == 0)
+            printf("Listen all channels\n");
+       else
+            printf("Listen channel %d\n", channel);
+       // FIN Agregado
+       luaL_checktype(L, -2, LUA_TBOOLEAN);
+       if (lua_toboolean(L, -2)) {
             onlyData = 1;
        }
-       if(lua_isnumber(L, -2)){
-	       rssi=lua_tointeger(L,-2);
+       if(lua_isnumber(L, -3)){
+	       rssi=lua_tointeger(L,-3);
 	       printf("Minimum rssi: %d \n",rssi) ;
        }
-       if(lua_isnumber(L, -3)){
-	       segs=lua_tointeger(L,-3);
+       if(lua_isnumber(L, -4)){
+	       segs=lua_tointeger(L,-4);
 	       printf("Seconds per channel: %d\n",segs) ;
        }
-       luaL_checktype(L, -4, LUA_TBOOLEAN);
-       if (lua_toboolean(L, -4)) {
+       luaL_checktype(L, -5, LUA_TBOOLEAN);
+       if (lua_toboolean(L, -5)) {
             table = 1;
        }
     } 
     else{
-    printf("syntax is radar(returnTable,listening seconds per channel,min rssi,onlyDataPackets)"); 
+        printf("syntax is radar(returnTable,listening seconds per channel,min rssi,onlyDataPackets,channel number)\n");
+	return 0;
     }
     // Scan wifi
-    if ((error = wifi_radar(&rssi, &maclist,&count,segs,onlyData))) {
+    if ((error = wifi_radar(&rssi, &maclist,&count,segs,onlyData,channel))) {
         return luaL_driver_error(L, error);
     }
     printf("%d devices founded \n",count);
@@ -426,6 +443,95 @@ static int lwifi_radar(lua_State* L) {
     }
     return 1;
 }
+
+// INI Agregado: función análoga a wifi_scan pero con opción a escanear un único canal
+// Agregado: cabezal de wifi_scan_channel para evitar warnings (para no agregarlo en drivers/wifi.h)
+// Implementación en components/sys/drivers/wifi.c
+driver_error_t *wifi_scan_channel(uint8_t channel, uint16_t *count, wifi_ap_record_t **list);
+
+static int lwifi_scan_channel(lua_State* L) {
+    driver_error_t *error;
+    wifi_ap_record_t *list;
+    uint16_t count, i;
+    u8_t table = 0;
+    char auth[13];
+    uint8_t channel;
+
+    if (lua_gettop(L) < 2) {
+        printf("syntax is scanchan(table, channel)\n");
+	return 0;
+    }
+
+    // Check if user wants scan's result as a table, or wants scan's result
+    // on the console
+    luaL_checktype(L, 1, LUA_TBOOLEAN);
+    if (lua_toboolean(L, 1)) {
+        table = 1;
+    }
+
+    channel = luaL_checkinteger(L, 2);
+
+    // Scan wifi
+    if ((error = wifi_scan_channel(channel, &count, &list))) {
+        return luaL_driver_error(L, error);
+    }
+
+    // Show / get APs
+    if (!table) {
+        printf("\r\n                           SSID  RSSI          AUTH  CH1  CH2\r\n");
+        printf("-------------------------------------------------------------\r\n");
+    } else {
+        lua_createtable(L, count, 0);
+    }
+
+    for(i=0;i<count;i++) {
+        if (!table) {
+            switch (list[i].authmode) {
+                case WIFI_AUTH_OPEN: strcpy(auth, "OPEN"); break;
+                case WIFI_AUTH_WEP: strcpy(auth, "WEP"); break;
+                case WIFI_AUTH_WPA_PSK: strcpy(auth, "WPA_PSK"); break;
+                case WIFI_AUTH_WPA2_PSK: strcpy(auth, "WPA2_PSK"); break;
+                case WIFI_AUTH_WPA_WPA2_PSK: strcpy(auth, "WPA_WPA2_PSK"); break;
+                default:
+                    break;
+            }
+
+            printf("%31.31s  %4d %13.13s   %2d   %2d\r\n",list[i].ssid, list[i].rssi, auth, list[i].primary, list[i].second);
+        } else {
+            lua_pushinteger(L, i);
+
+            lua_createtable(L, 0, 3);
+
+            lua_pushstring(L, (char *)list[i].ssid);
+            lua_setfield (L, -2, "ssid");
+
+            lua_pushinteger(L, list[i].rssi);
+            lua_setfield (L, -2, "rssi");
+
+            lua_pushinteger(L, list[i].authmode);
+            lua_setfield (L, -2, "auth");
+
+            lua_pushinteger(L, list[i].primary);
+            lua_setfield (L, -2, "ch1");
+
+            lua_pushinteger(L, list[i].second);
+            lua_setfield (L, -2, "ch2");
+
+            lua_settable(L,-3);
+        }
+    }
+
+    if (list) {
+        free(list);
+    }
+
+    if (!table) {
+        printf("\r\n");
+    }
+
+    return table;
+}
+// FIN Agregado
 
 static int lwifi_stat(lua_State* L) {
     ifconfig_t info;
@@ -620,6 +726,7 @@ static const LUA_REG_TYPE wifi_map[] = {
     { LSTRKEY( "stop"       ),     LFUNCVAL( lwifi_stop             ) },
     { LSTRKEY( "stat"       ),     LFUNCVAL( lwifi_stat             ) },
     { LSTRKEY( "radar"      ),     LFUNCVAL( lwifi_radar            ) },
+    { LSTRKEY( "scanch"     ),     LFUNCVAL( lwifi_scan_channel     ) }, // Agregado: análoga a scan con opción de elegir canal
 #if CONFIG_ESP32_WIFI_NVS_ENABLED
     // wps ssid+auth can only be stored to nvs
     // so if nvs is disabled, wps would have to be repeated on every boot

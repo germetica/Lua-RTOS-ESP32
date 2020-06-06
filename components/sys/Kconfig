@@ -130,6 +130,9 @@ menu "Lua RTOS"
       config LUA_RTOS_FIRMWARE_GENERIC_OTA
          bool "Generic ESP32 board with OTA"
 
+      config LUA_RTOS_FIRMWARE_sparkfun
+         bool "Sparkfun"
+
    endchoice
 
    menu "OTA"

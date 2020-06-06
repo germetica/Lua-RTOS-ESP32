@@ -148,7 +148,11 @@ static const uint32_t freq[] = { 868100000, 868300000, 868500000, 867100000, 867
 #endif
 
 #if CONFIG_LUA_RTOS_LORA_BAND_US915
-#error "Not supported US915"
+// Línea que estaba:
+//#error "Not supported US915"
+// Líneas que agregué
+static const uint8_t sf[] = {7, 8, 9, 10, 11, 12};
+static const uint32_t freq[] = { 923300000, 923300000, 923300000, 923300000, 923300000, 923300000, 923300000, 923300000, 923300000 };
 #endif
 
 

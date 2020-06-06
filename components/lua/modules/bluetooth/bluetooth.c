@@ -134,6 +134,12 @@ static void scan_cb(int callback, bt_adv_frame_t *data) {
 			default:
 				break;
 		}
+		// INI Agregado para tener BD_ADDR del dispositivo visto
+		lua_pushstring(TL, "bdaddr");
+		val_to_hex_string(buff, (char *)data->bd_addr, sizeof(data->bd_addr), 0);
+		lua_pushstring(TL, buff);
+		lua_settable(TL, -3);
+		// FIN Agregado
 
 		lua_pcall(TL, 1, 0, 0);
         luaL_unref(TL, LUA_REGISTRYINDEX, fref);
@@ -151,6 +157,18 @@ static int lbt_attach( lua_State* L ) {
 
 	return 0;
 }
+
+// INI Agregado para obtener el BD_ADDR de este dispositivo
+static int lbt_bd_addr( lua_State *L ) {
+	uint8_t bd_addr[6];
+	char bd_addr_char[12];
+	esp_read_mac(bd_addr, 2/*bluetooth*/);
+	val_to_hex_string(bd_addr_char, (char *)bd_addr, sizeof(bd_addr), 0);
+	//printf("[%s:%d] bd_addr_char: %s\r\n", __FILE__, __LINE__, bd_addr_char);
+	lua_pushstring(L, bd_addr_char);
+	return 1;
+}
+// FIN Agregado
 
 static int lbt_advertise_start( lua_State* L ) {
 	driver_error_t *error;
@@ -315,6 +333,7 @@ static const LUA_REG_TYPE lbt_map[] = {
 	{ LSTRKEY( "chann"             ), LROVAL  ( lbt_adv_channel_map   ) },
 	{ LSTRKEY( "filter"            ), LROVAL  ( lbt_adv_filter_policy ) },
 	{ LSTRKEY( "service"           ), LROVAL  ( lbt_service ) },
+	{ LSTRKEY( "bdaddr"            ), LFUNCVAL( lbt_bd_addr           ) }, // Agregado: función para obtener BD_ADDR de este dispositivo
 	{ LNILKEY, LNILVAL }
 };
 

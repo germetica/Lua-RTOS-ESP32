@@ -368,5 +368,19 @@
                 "filesystem": "default"
             }
         ]
+    },
+    {
+        "description": "Sparkfun",
+        "manufacturer": "Generic",
+        "image": "",
+        "usb_vid_pid": "1A86:7523",
+        "usb_port_exp": "",
+        "firmwares": [
+            {
+                "id": "sparkfun",
+                "description": "Sparkfun",
+                "filesystem": "default"
+            }
+        ]
     }
 ]

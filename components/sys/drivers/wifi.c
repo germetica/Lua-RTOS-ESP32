@@ -75,6 +75,7 @@
 #include <esp_wpa2.h>
 #include <esp_smartconfig.h>
 #include <pthread.h>
+#include <nvs.h>
 
 typedef struct
 {
@@ -832,6 +833,17 @@ char *mac2str(const unsigned char *mac,const signed rssi)
 	return buffer;
 }
 
+int macCompare(void* a, void* b)
+{
+        char amac[13];
+        char bmac[13];
+        strncpy(amac,a,12);
+        strncpy(bmac,b,12);
+        amac[12]='\0';
+        bmac[12]='\0';
+        return strcmp(amac,bmac) == 0;
+}
+
 void wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type)
 {
 	wifi_ieee80211_pkt_t *pkkt = ((wifi_promiscuous_pkt_t *)buf)->payload;
@@ -868,17 +880,6 @@ void wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type)
 	}
 }
 
-int macCompare(void* a, void* b)
-{
-	char amac[13];
-	char bmac[13];
-	strncpy(amac,a,12);
-	strncpy(bmac,b,12);
-	amac[12]='\0';
-	bmac[12]='\0';
-	return strcmp(amac,bmac) == 0; 
-}
-
 static void initialize_nvs()
 {
     esp_err_t err = nvs_flash_init();
@@ -889,7 +890,7 @@ static void initialize_nvs()
     ESP_ERROR_CHECK(err);
 }
 
-driver_error_t *wifi_radar(uint8_t *minsen, mac_t* *list, uint16_t * count,int segs,u8_t onlyData) {
+driver_error_t *wifi_radar(int8_t *minsen, mac_t* *list, uint16_t * count,int segs,u8_t onlyData, uint8_t channel) {
     driver_error_t *error;
     *count=0;
     *list = NULL;
@@ -941,13 +942,22 @@ driver_error_t *wifi_radar(uint8_t *minsen, mac_t* *list, uint16_t * count,int s
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous_rx_cb(wifi_promiscuous_cb));
     ESP_ERROR_CHECK(esp_wifi_set_promiscuous(true));
     
-    int i;
-    for (i = 1; i <14; i++)
-	{
-	     printf("channel %d \r\n\r\n -------------------- \r\n",i);
-             esp_wifi_set_channel(i, WIFI_SECOND_CHAN_NONE);
-             vTaskDelay(pdMS_TO_TICKS(segs*1000));	     
-	}
+    if (channel == 0) {
+        // Todos los canales
+        int i;
+        for (i = 1; i <14; i++)
+	    {
+	         printf("--------------------\r\nchannel %d \r\n\r\n", i);
+                 esp_wifi_set_channel(i, WIFI_SECOND_CHAN_NONE);
+                 vTaskDelay(pdMS_TO_TICKS(segs*1000));	     
+	    }
+    }
+    else {
+        // Un canal específico
+        printf("--------------------\r\nchannel %d \r\n\r\n", channel);
+        esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+        vTaskDelay(pdMS_TO_TICKS(segs*1000));
+    }
     printf("end\r\n");
 
     ListElement* current = NULL;
@@ -975,5 +985,97 @@ driver_error_t *wifi_radar(uint8_t *minsen, mac_t* *list, uint16_t * count,int s
     if ((error = wifi_deinit())) return error;
     return NULL;
 }
+
+// INI Agregado: wifi_scan_channel (análoga a wifi_scan pero con opción a un canal específico)
+driver_error_t *wifi_scan_channel(uint8_t channel, uint16_t *count, wifi_ap_record_t **list) {
+    driver_error_t *error;
+
+    *list = NULL;
+    *count = 0;
+
+    if (status_get(STATUS_WIFI_INITED)) {
+        wifi_mode_t mode;
+        if ((error = wifi_check_error(esp_wifi_get_mode(&mode)))) return error;
+
+        if (WIFI_MODE_AP == mode) {
+            if(status_get(STATUS_WIFI_STARTED)) {
+                if ((error = wifi_check_error(esp_wifi_stop()))) return error;
+                status_set(0x00000000, STATUS_WIFI_STARTED);
+            }
+            status_set(0x00000000, STATUS_WIFI_INITED);
+        }
+    }
+
+    if (!status_get(STATUS_WIFI_INITED)) {
+        // Attach wifi driver
+        if ((error = wifi_init(WIFI_MODE_STA))) {
+            return error;
+        }
+    }
+
+    if (!status_get(STATUS_WIFI_STARTED)) {
+        // Start wifi
+        if ((error = wifi_check_error(esp_wifi_start()))) return error;
+        /* when scan()'ing shortly after esp_wifi_start() the result list may wrongly be empty
+           so we waste some time here to make sure the system had some time to find some APs */
+        delay(10);
+    }
+
+    if (channel > 13)
+        channel = 0;
+    //if (channel == 0)
+    //    printf("Scanning all channels\n");
+    //else
+    //    printf("Scanning channel %d\n", channel);
+    wifi_scan_config_t conf = {
+        .ssid = NULL,
+        .bssid = NULL,
+        .channel = channel,
+        .show_hidden = 1
+    };
+
+    // Start scan
+    if ((error = wifi_check_error(esp_wifi_scan_start(&conf, true)))) return error;
+
+    // Wait for scan end
+    EventBits_t uxBits = xEventGroupWaitBits(netEvent, evWIFI_SCAN_END, pdTRUE, pdFALSE, portMAX_DELAY);
+    if (uxBits & (evWIFI_SCAN_END)) {
+        // Get count of found AP
+        if ((error = wifi_check_error(esp_wifi_scan_get_ap_num(count)))) return error;
+
+        // An empty list shall not throw an error
+        if(0 < *count) {
+
+            // Allocate space for AP list
+            *list = (wifi_ap_record_t *)malloc(sizeof(wifi_ap_record_t) * (*count));
+            if (!*list) {
+                return driver_error(WIFI_DRIVER, WIFI_ERR_WIFI_NO_MEM,NULL);
+            }
+
+            // Get AP list
+            if ((error = wifi_check_error(esp_wifi_scan_get_ap_records(count, *list)))) {
+                *list = NULL;
+                *count = 0;
+                free(list);
+
+                return error;
+            }
+
+        }
+    }
+
+    if (!status_get(STATUS_WIFI_STARTED)) {
+        // Stop wifi
+        if ((error = wifi_check_error(esp_wifi_stop()))) return error;
+    }
+
+    if (!status_get(STATUS_WIFI_SETUP)) {
+        // Detach wifi driver
+        if ((error = wifi_deinit())) return error;
+    }
+
+    return NULL;
+}
+// FIN Agregado
 
 #endif

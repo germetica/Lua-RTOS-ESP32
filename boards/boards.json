@@ -454,5 +454,17 @@
         "usb_vid_pid": "",
         "usb_port_exp": "",
         "image": ""
+    },
+    {
+        "id": "sparkfun",
+        "description": "Sparkfun",
+        "manufacturer": "Generic",
+        "brand": "",
+        "type": "sparkfun",
+        "subtype": "",
+        "filesystem": "default",
+        "usb_vid_pid": "1A86:7523",
+        "usb_port_exp": "",
+        "image": ""
     }
 ]
