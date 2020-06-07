@@ -161,7 +161,7 @@ static int lbt_attach( lua_State* L ) {
 // INI Agregado para obtener el BD_ADDR de este dispositivo
 static int lbt_bd_addr( lua_State *L ) {
 	uint8_t bd_addr[6];
-	char bd_addr_char[12];
+	char bd_addr_char[13];
 	esp_read_mac(bd_addr, 2/*bluetooth*/);
 	val_to_hex_string(bd_addr_char, (char *)bd_addr, sizeof(bd_addr), 0);
 	//printf("[%s:%d] bd_addr_char: %s\r\n", __FILE__, __LINE__, bd_addr_char);
