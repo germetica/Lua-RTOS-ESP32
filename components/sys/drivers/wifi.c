@@ -110,6 +110,7 @@ typedef struct {
 
 static List* maclist;
 static int8_t rssimin; 
+//static SemaphoreHandle_t macListMutex = NULL;
 
 
 #define WIFI_LOG(...) syslog(LOG_DEBUG, __VA_ARGS__);
@@ -820,11 +821,11 @@ char *mac2str(const unsigned char *mac,const signed rssi)
 		*buf++ = hex[val & 0xf];
 	}
 	
-	char rssibuf[3];
+	char rssibuf[5];
 	sprintf(rssibuf,"%d",rssi);
 
 	*buf++ = '|';
-	for (i = 0; i < sizeof(rssibuf); i++)
+	for (i = 0; i < strlen(rssibuf); i++)
 	{
 		*buf++ = rssibuf[i];
 	}
@@ -846,8 +847,12 @@ int macCompare(void* a, void* b)
 
 void wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type)
 {
+	if (type == WIFI_PKT_MISC) // Other type, such as MIMO etc. 'buf' argument is wifi_promiscuous_pkt_t but the payload is zero length.
+		return;
 	wifi_ieee80211_pkt_t *pkkt = ((wifi_promiscuous_pkt_t *)buf)->payload;
 	signed rssi = ((wifi_promiscuous_pkt_t *)buf)->rx_ctrl.rssi;
+	if (rssi < rssimin)
+		return;
 	char *mac;
 	if (pkkt->to_ds==1 && pkkt->from_ds==0){
 		mac = strdup(mac2str(pkkt->addr2,rssi));	 
@@ -873,9 +878,12 @@ void wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type)
 	} else {
 		mac = NULL;
 	}
+	if (mac == NULL)
+		return;
 
-	if (mac !=NULL && type!=WIFI_PKT_MISC && (rssimin<rssi) && !ListFindItem(maclist,mac,macCompare)){
-		ListAppend(maclist, (void*)mac, strlen(mac));
+	if (!ListFindItem(maclist,mac,macCompare)){
+		printf("[%s:%d (%s)] Voy a ejecutar ListAppend(maclist, ...)\n", __FILE__, __LINE__, __func__);
+		ListAppend(maclist, (void*)mac, strlen(mac)+1);
 		printf("Device found: %s \n",  ((char*)(maclist->last->content)));
 	}
 }
@@ -891,16 +899,19 @@ static void initialize_nvs()
 }
 
 driver_error_t *wifi_radar(int8_t *minsen, mac_t* *list, uint16_t * count,int segs,u8_t onlyData, uint8_t channel) {
+	//if (macListMutex == NULL)
+	//	macListMutex = xSemaphoreCreateMutex();
     driver_error_t *error;
     *count=0;
     *list = NULL;
     
     rssimin = *minsen;
 
-    initialize_nvs();
+    //<ver_si_es_necesario>//initialize_nvs();
 
     // initialize wifi
     if (status_get(STATUS_WIFI_INITED)) {
+		printf("[%s:%d (%s)] En if \"STATUS_WIFI_INITED\"\n", __FILE__, __LINE__, __func__);
         wifi_mode_t mode;
         if ((error = wifi_check_error(esp_wifi_get_mode(&mode)))) return error;
 
@@ -914,18 +925,26 @@ driver_error_t *wifi_radar(int8_t *minsen, mac_t* *list, uint16_t * count,int se
     }
 
     if (!status_get(STATUS_WIFI_INITED)) {
+		printf("[%s:%d (%s)] En if !\"STATUS_WIFI_INITED\"\n", __FILE__, __LINE__, __func__);
         // Attach wifi driver
         if ((error = wifi_init(WIFI_MODE_STA))) {
+			printf("[%s:%d (%s)]     -> ERROR!!!!\n", __FILE__, __LINE__, __func__);
             return error;
         }
     }
 
     if (!status_get(STATUS_WIFI_STARTED)) {
+		printf("[%s:%d (%s)] En if \"!STATUS_WIFI_STARTED\"\n", __FILE__, __LINE__, __func__);
         // Start wifi
-        if ((error = wifi_check_error(esp_wifi_start()))) return error;
+        if ((error = wifi_check_error(esp_wifi_start()))) {
+			printf("[%s:%d (%s)]     -> ERROR!!!! al intentar iniciar\n", __FILE__, __LINE__, __func__);
+			return error;
+		}
         delay(10);
+		printf("[%s:%d (%s)]     -> Inició WIFI\n", __FILE__, __LINE__, __func__);
     }
 
+	printf("[%s:%d (%s)] Voy a ejecutar ListInitialize()\n", __FILE__, __LINE__, __func__);
     maclist = ListInitialize();
     //set filter of prom packets
 
@@ -959,6 +978,8 @@ driver_error_t *wifi_radar(int8_t *minsen, mac_t* *list, uint16_t * count,int se
         vTaskDelay(pdMS_TO_TICKS(segs*1000));
     }
     printf("end\r\n");
+	ESP_ERROR_CHECK(esp_wifi_set_promiscuous(false));
+    printf("[%s:%d (%s)] Ejecuté esp_wifi_set_promiscuous(false)\n", __FILE__, __LINE__, __func__);
 
     ListElement* current = NULL;
     int size = maclist->count;
@@ -968,19 +989,21 @@ driver_error_t *wifi_radar(int8_t *minsen, mac_t* *list, uint16_t * count,int se
         int i=0;
 	while (ListNextElement(maclist, &current) != NULL){
 	     char * mac =  ((char*)(current->content));
-             listt[i]=malloc(22);
+             listt[i]=malloc(strlen(mac)+1); // La mac, luego habrá que hacer free
              strcpy(listt[i],mac);
              i++;
 	}
         ListFree(maclist);
+		printf("[%s:%d (%s)] Ejecuté ListFree(maclist)\n", __FILE__, __LINE__, __func__);
 
        *list =(mac_t*) malloc(sizeof(listt));
        memset(*list, '\0', sizeof(listt));
-       memcpy(*list,listt,sizeof(listt));       
+       memcpy(*list,listt,sizeof(listt));      // Se están copiando los punteros, no las "mac|rssi" 
     }
     *count = (unsigned int) size;
 
-    ESP_ERROR_CHECK(esp_wifi_set_promiscuous(false));
+    //ESP_ERROR_CHECK(esp_wifi_set_promiscuous(false));
+	//printf("[%s:%d (%s)] Ejecuté esp_wifi_set_promiscuous(false)\n", __FILE__, __LINE__, __func__);
     if ((error = wifi_check_error(esp_wifi_stop()))) return error;
     if ((error = wifi_deinit())) return error;
     return NULL;

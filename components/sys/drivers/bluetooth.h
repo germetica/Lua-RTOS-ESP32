@@ -60,6 +60,10 @@
 
 #include <sys/driver.h>
 
+// Includes para BR/EDR (Bluetooth Classic)
+#include "esp_gap_bt_api.h"
+#include "esp_bt_device.h"
+
 // BT modes
 typedef enum {
 	Idle = 0,
@@ -72,6 +76,7 @@ typedef enum {
 	BTAdvUnknown = 0,
 	BTAdvEddystoneUID = 1,
 	BTAdvEddystoneURL = 2,
+	BTAdvBrEdrInqRsp = 3 // Agregado: BR/EDR Inquiry Response
 } bt_adv_frame_type_t;
 
 typedef struct {
@@ -79,6 +84,7 @@ typedef struct {
 	uint8_t raw[31];
 	uint8_t len;
 	uint8_t flags;
+	uint8_t bd_addr[ESP_BD_ADDR_LEN]; // Agregado: BD_ADDR del dispositivo emisor
 
 	bt_adv_frame_type_t frame_type;
 	union {
@@ -94,9 +100,12 @@ typedef struct {
 			float   distance;
 			uint8_t url[100];
 		} eddystone_url;
+		
+		struct { // Agregado: Nombre del dispositivo BR/EDR
+			char bdname[ESP_BT_GAP_MAX_BDNAME_LEN];
+			uint8_t bdname_len;
+		} bredr_inq_rsp;
 	} data;
-	
-	uint8_t bd_addr[6]; // Agregado: BD_ADDR del dispositivo emisor
 } bt_adv_frame_t;
 
 typedef void (*bt_scan_callback_t)(int, bt_adv_frame_t *);
@@ -122,6 +131,14 @@ driver_error_t *bt_adv_start(bte_advertise_params_t params, uint8_t *adv_data, u
 driver_error_t *bt_adv_stop();
 driver_error_t *bt_scan_start(bt_scan_callback_t cb, int cb_id);
 driver_error_t *bt_scan_stop();
+driver_error_t *bt_setup_dual(uint8_t scan_bredr_mode, const char *dev_bredr_name); // Agregado: Setup para Modo dual
+driver_error_t *bt_scan_set_le_duration(uint32_t ble_duration); // Agregado: Setear duración de LE
+driver_error_t *bt_scan_set_bredr_duration(uint8_t bredr_inq_len); // Agregado: Setear duración de BR/EDR Inquiry (*1.28 s)
+driver_error_t *bt_scan_start_le(bt_scan_callback_t cb, int cb_id); // Agregado: Scan LE
+driver_error_t *bt_scan_start_bredr(bt_scan_callback_t cb, int cb_id); // Agregado: Scan BR/EDR
+driver_error_t *bt_is_le_scanning(bool *isLeScanning); // Agregado: Indica si se está ejecutando un Scan LE
+driver_error_t *bt_is_bredr_scanning(bool *isBrEdrScanning); // Agregado: Indica si se está ejecutando un Scan BR/EDR
+driver_error_t *bt_bd_addr(uint8_t *bd_addr); // Agregado: Obtener BD_ADDR de este dispositivo
 
 extern const int bt_errors;
 extern const int bt_error_map;

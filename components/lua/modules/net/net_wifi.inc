@@ -431,6 +431,7 @@ static int lwifi_radar(lua_State* L) {
 		       printf("  list[%d] = %s\n", i,macl); 
 		       lua_pushstring(L, (char *)maclist[i].mac);
 		       lua_rawseti(L,-2,i+1); 
+			   free(maclist[i].mac);
 		}
     } else {
 	    lua_pushinteger(L, count);

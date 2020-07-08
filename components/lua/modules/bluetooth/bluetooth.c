@@ -131,6 +131,20 @@ static void scan_cb(int callback, bt_adv_frame_t *data) {
 				lua_settable(TL, -3);
 				break;
 
+            case BTAdvBrEdrInqRsp:
+				lua_pushstring(TL, "bdname");
+				if (data->data.bredr_inq_rsp.bdname_len == 0)
+					lua_pushstring(TL, "");
+				else {
+					char *bdname = malloc(data->data.bredr_inq_rsp.bdname_len + 1);
+					memcpy(bdname, data->data.bredr_inq_rsp.bdname, data->data.bredr_inq_rsp.bdname_len);
+					bdname[data->data.bredr_inq_rsp.bdname_len] = '\0';
+                	lua_pushstring(TL, (const char *)bdname);
+					free(bdname);
+				}
+                lua_settable(TL, -3);
+				break;
+				
 			default:
 				break;
 		}
@@ -146,6 +160,7 @@ static void scan_cb(int callback, bt_adv_frame_t *data) {
 	}
 }
 
+
 static int lbt_attach( lua_State* L ) {
 	driver_error_t *error;
 
@@ -158,11 +173,32 @@ static int lbt_attach( lua_State* L ) {
 	return 0;
 }
 
+
+// INI Agregado - attach Dual Mode (BR/EDR y LE)
+static int lbt_attach_dual( lua_State* L ) {
+	driver_error_t *error;
+	
+	// scan_bredr_mode:
+	//   0: Neither discoverable nor connectable
+	//   1: Connectable but not discoverable
+	//   2: both discoverable and connectable
+	uint8_t scan_bredr_mode = luaL_checkinteger(L, 1);
+	const char *dev_bredr_name = luaL_checkstring(L, 2);
+	
+    if ((error = bt_setup_dual(scan_bredr_mode, dev_bredr_name))) {
+    	return luaL_driver_error(L, error);
+    }
+	
+    return 0;
+}
+// FIN Agregado - attach Dual Mode (BR/EDR y LE)
+
+
 // INI Agregado para obtener el BD_ADDR de este dispositivo
 static int lbt_bd_addr( lua_State *L ) {
 	uint8_t bd_addr[6];
 	char bd_addr_char[13];
-	esp_read_mac(bd_addr, 2/*bluetooth*/);
+	bt_bd_addr(bd_addr); // drivers/bluetooth.h
 	val_to_hex_string(bd_addr_char, (char *)bd_addr, sizeof(bd_addr), 0);
 	//printf("[%s:%d] bd_addr_char: %s\r\n", __FILE__, __LINE__, bd_addr_char);
 	lua_pushstring(L, bd_addr_char);
@@ -248,6 +284,78 @@ static int lbt_scan_start( lua_State* L ) {
     return 0;
 }
 
+
+/**
+ *  Agregado - Para configurar la duración del Scan BLE y del Inquiry BR/EDR
+ *  Para BLE, la duración en segundos. 0 es para siempre, o hasta que se detenga manualmente
+ *  Para BR/EDR, la duración es en unidades de 1,28 s.
+ */
+static int lbt_scan_set_le_duration( lua_State* L ) {
+    uint32_t ble_duration  = luaL_checkinteger(L, 1);
+	bt_scan_set_le_duration(ble_duration);
+	return 0;
+}
+static int lbt_scan_set_bredr_duration( lua_State* L ) {
+    uint8_t  bredr_inq_len = luaL_checkinteger(L, 1);
+    bt_scan_set_bredr_duration(bredr_inq_len);
+    return 0;
+}
+
+
+// Agregado: Scan LE
+static int lbt_scan_start_le( lua_State* L ) {
+    driver_error_t *error;
+	
+    // Función de callback
+    luaL_checktype(L, 1, LUA_TFUNCTION);
+    lua_pushvalue(L, 1);
+	int callback = luaL_ref(L, LUA_REGISTRYINDEX);
+	
+    // Start scanning
+    if ((error = bt_scan_start_le(scan_cb, callback))) {
+		return luaL_driver_error(L, error);
+    }
+	
+    return 0;
+}
+
+
+// Agregado: Scan BR/EDR
+static int lbt_scan_start_bredr( lua_State* L ) {
+    driver_error_t *error;
+	
+    // Función de callback LE
+    luaL_checktype(L, 1, LUA_TFUNCTION);
+    lua_pushvalue(L, 1);
+    int callback = luaL_ref(L, LUA_REGISTRYINDEX);
+	
+    // Start scanning
+    if ((error = bt_scan_start_bredr(scan_cb, callback))) {
+		return luaL_driver_error(L, error);
+    }
+	
+    return 0;
+}
+
+
+// Agregado: Indica si se está ejecutando un Scan LE
+static int lbt_is_le_scanning( lua_State* L) {
+	bool isLeScanning;
+	bt_is_le_scanning(&isLeScanning);
+	lua_pushboolean(L, isLeScanning);
+	return 1;
+}
+
+
+// Agregado: Indica si se está ejecutando un Scan BR/EDR
+static int lbt_is_bredr_scanning( lua_State* L) {
+    bool isBrEdrScanning;
+    bt_is_bredr_scanning(&isBrEdrScanning);
+    lua_pushboolean(L, isBrEdrScanning);
+	return 1;
+}
+
+
 static int lbt_scan_stop( lua_State* L ) {
     driver_error_t *error;
 
@@ -312,12 +420,18 @@ static const LUA_REG_TYPE lbt_advertise_map[] = {
 static const LUA_REG_TYPE lbt_scan_map[] = {
 	{ LSTRKEY( "start" ), LFUNCVAL ( lbt_scan_start ) },
 	{ LSTRKEY( "stop"  ), LFUNCVAL ( lbt_scan_stop  ) },
+	{ LSTRKEY( "setLeDuration"    ), LFUNCVAL ( lbt_scan_set_le_duration    ) }, // Agregado: Para asignar la duración del scan LE
+	{ LSTRKEY( "setBrEdrDuration" ), LFUNCVAL ( lbt_scan_set_bredr_duration ) }, // Agregado: Para asignar la duración del scan BR/EDR
+	{ LSTRKEY( "startLe"          ), LFUNCVAL ( lbt_scan_start_le           ) }, // Agregado: Iniciar scan LE
+	{ LSTRKEY( "startBrEdr"       ), LFUNCVAL ( lbt_scan_start_bredr        ) }, // Agregado: Iniciar scan BR/EDR
 	{ LNILKEY,LNILVAL }
 };
 
 static const LUA_REG_TYPE lbt_frame_type[] = {
 	{ LSTRKEY( "EddystoneUID"  ), LINTVAL ( BTAdvEddystoneUID  ) },
 	{ LSTRKEY( "EddystoneURL"  ), LINTVAL ( BTAdvEddystoneURL  ) },
+	{ LSTRKEY( "OtherAdvertisement" ), LINTVAL ( BTAdvUnknown       ) }, // Agregado: Otro tipo de Advertisement
+	{ LSTRKEY( "BR_EDRInqRsp"       ), LINTVAL ( BTAdvBrEdrInqRsp   ) }, // Agregado: Tipo de frame BR/EDR Inquiry Response
 	{ LNILKEY,LNILVAL }
 };
 
@@ -334,6 +448,9 @@ static const LUA_REG_TYPE lbt_map[] = {
 	{ LSTRKEY( "filter"            ), LROVAL  ( lbt_adv_filter_policy ) },
 	{ LSTRKEY( "service"           ), LROVAL  ( lbt_service ) },
 	{ LSTRKEY( "bdaddr"            ), LFUNCVAL( lbt_bd_addr           ) }, // Agregado: función para obtener BD_ADDR de este dispositivo
+	{ LSTRKEY( "attachdual"        ), LFUNCVAL( lbt_attach_dual       ) }, // Agregado: función attach en modo dual, para tener scan LE y BR/EDR
+	{ LSTRKEY( "isLeScanning"      ), LFUNCVAL( lbt_is_le_scanning    ) }, // Agregado: Indica si se está ejecutando un Scan LE 
+	{ LSTRKEY( "isBrEdrScanning"   ), LFUNCVAL( lbt_is_bredr_scanning ) }, // Agregado: Indica si se está ejecutando un Scan BR/EDR
 	{ LNILKEY, LNILVAL }
 };
 
