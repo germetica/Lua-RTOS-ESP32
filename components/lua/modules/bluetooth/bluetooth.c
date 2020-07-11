@@ -195,10 +195,10 @@ static int lbt_attach_dual( lua_State* L ) {
 
 
 // INI Agregado para obtener el BD_ADDR de este dispositivo
-static int lbt_bd_addr( lua_State *L ) {
+static int lbt_get_bdaddr( lua_State *L ) {
 	uint8_t bd_addr[6];
 	char bd_addr_char[13];
-	bt_bd_addr(bd_addr); // drivers/bluetooth.h
+	bt_get_bdaddr(bd_addr); // drivers/bluetooth.h
 	val_to_hex_string(bd_addr_char, (char *)bd_addr, sizeof(bd_addr), 0);
 	//printf("[%s:%d] bd_addr_char: %s\r\n", __FILE__, __LINE__, bd_addr_char);
 	lua_pushstring(L, bd_addr_char);
@@ -447,7 +447,7 @@ static const LUA_REG_TYPE lbt_map[] = {
 	{ LSTRKEY( "chann"             ), LROVAL  ( lbt_adv_channel_map   ) },
 	{ LSTRKEY( "filter"            ), LROVAL  ( lbt_adv_filter_policy ) },
 	{ LSTRKEY( "service"           ), LROVAL  ( lbt_service ) },
-	{ LSTRKEY( "bdaddr"            ), LFUNCVAL( lbt_bd_addr           ) }, // Agregado: función para obtener BD_ADDR de este dispositivo
+	{ LSTRKEY( "getbdaddr"         ), LFUNCVAL( lbt_get_bdaddr        ) }, // Agregado: función para obtener BD_ADDR de este dispositivo
 	{ LSTRKEY( "attachdual"        ), LFUNCVAL( lbt_attach_dual       ) }, // Agregado: función attach en modo dual, para tener scan LE y BR/EDR
 	{ LSTRKEY( "isLeScanning"      ), LFUNCVAL( lbt_is_le_scanning    ) }, // Agregado: Indica si se está ejecutando un Scan LE 
 	{ LSTRKEY( "isBrEdrScanning"   ), LFUNCVAL( lbt_is_bredr_scanning ) }, // Agregado: Indica si se está ejecutando un Scan BR/EDR

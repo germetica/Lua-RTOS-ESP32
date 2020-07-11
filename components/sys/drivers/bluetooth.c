@@ -596,9 +596,6 @@ driver_error_t *bt_scan_start_le(bt_scan_callback_t cb, int cb_id) {
 		return driver_error(BT_DRIVER, BT_ERR_CANT_START_SCAN, NULL);
 	}
 	
-	/* start to discover nearby Bluetooth devices */
-    esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, bredr_scan_inq_len, 0);
-	
 	return NULL;
 }
 
@@ -657,7 +654,7 @@ driver_error_t *bt_is_bredr_scanning(bool *isBrEdrScanning) {
 
 
 // INI Agregado para obtener el BD_ADDR de este dispositivo
-driver_error_t *bt_bd_addr(uint8_t *bd_addr ) {
+driver_error_t *bt_get_bdaddr(uint8_t *bd_addr ) {
     if (!bd_addr)
 		return driver_error(BT_DRIVER, BT_ERR_INVALID_ARGUMENT, NULL);
 	// esp-idf/components/esp32/include/esp_system.h:

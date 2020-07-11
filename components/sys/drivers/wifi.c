@@ -110,7 +110,8 @@ typedef struct {
 
 static List* maclist;
 static int8_t rssimin; 
-//static SemaphoreHandle_t macListMutex = NULL;
+#define PRINT_MSJ_DEBUG 0
+#define PRINT_MSJ_WF_RADAR 0
 
 
 #define WIFI_LOG(...) syslog(LOG_DEBUG, __VA_ARGS__);
@@ -882,9 +883,10 @@ void wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type)
 		return;
 
 	if (!ListFindItem(maclist,mac,macCompare)){
-		printf("[%s:%d (%s)] Voy a ejecutar ListAppend(maclist, ...)\n", __FILE__, __LINE__, __func__);
 		ListAppend(maclist, (void*)mac, strlen(mac)+1);
+#if PRINT_MSJ_WF_RADAR
 		printf("Device found: %s \n",  ((char*)(maclist->last->content)));
+#endif
 	}
 }
 
@@ -911,7 +913,9 @@ driver_error_t *wifi_radar(int8_t *minsen, mac_t* *list, uint16_t * count,int se
 
     // initialize wifi
     if (status_get(STATUS_WIFI_INITED)) {
+#if PRINT_MSJ_DEBUG
 		printf("[%s:%d (%s)] En if \"STATUS_WIFI_INITED\"\n", __FILE__, __LINE__, __func__);
+#endif
         wifi_mode_t mode;
         if ((error = wifi_check_error(esp_wifi_get_mode(&mode)))) return error;
 
@@ -925,26 +929,38 @@ driver_error_t *wifi_radar(int8_t *minsen, mac_t* *list, uint16_t * count,int se
     }
 
     if (!status_get(STATUS_WIFI_INITED)) {
+#if PRINT_MSJ_DEBUG
 		printf("[%s:%d (%s)] En if !\"STATUS_WIFI_INITED\"\n", __FILE__, __LINE__, __func__);
+#endif
         // Attach wifi driver
         if ((error = wifi_init(WIFI_MODE_STA))) {
+#if PRINT_MSJ_DEBUG
 			printf("[%s:%d (%s)]     -> ERROR!!!!\n", __FILE__, __LINE__, __func__);
+#endif
             return error;
         }
+#if PRINT_MSJ_DEBUG
+		printf("[%s:%d (%s)]     -> WiFi Inited\n", __FILE__, __LINE__, __func__);
+#endif
     }
 
     if (!status_get(STATUS_WIFI_STARTED)) {
+#if PRINT_MSJ_DEBUG
 		printf("[%s:%d (%s)] En if \"!STATUS_WIFI_STARTED\"\n", __FILE__, __LINE__, __func__);
+#endif
         // Start wifi
         if ((error = wifi_check_error(esp_wifi_start()))) {
+#if PRINT_MSJ_DEBUG
 			printf("[%s:%d (%s)]     -> ERROR!!!! al intentar iniciar\n", __FILE__, __LINE__, __func__);
+#endif
 			return error;
 		}
         delay(10);
-		printf("[%s:%d (%s)]     -> Inició WIFI\n", __FILE__, __LINE__, __func__);
+#if PRINT_MSJ_DEBUG
+		printf("[%s:%d (%s)]     -> WiFi Started\n", __FILE__, __LINE__, __func__);
+#endif
     }
 
-	printf("[%s:%d (%s)] Voy a ejecutar ListInitialize()\n", __FILE__, __LINE__, __func__);
     maclist = ListInitialize();
     //set filter of prom packets
 
@@ -966,20 +982,25 @@ driver_error_t *wifi_radar(int8_t *minsen, mac_t* *list, uint16_t * count,int se
         int i;
         for (i = 1; i <14; i++)
 	    {
-	         printf("--------------------\r\nchannel %d \r\n\r\n", i);
+#if PRINT_MSJ_WF_RADAR
+	         printf("--------------------\nchannel %d\n\n", i);
+#endif
                  esp_wifi_set_channel(i, WIFI_SECOND_CHAN_NONE);
                  vTaskDelay(pdMS_TO_TICKS(segs*1000));	     
 	    }
     }
     else {
         // Un canal específico
-        printf("--------------------\r\nchannel %d \r\n\r\n", channel);
+#if PRINT_MSJ_WF_RADAR
+        printf("--------------------\nchannel %d\n\n", channel);
+#endif
         esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
         vTaskDelay(pdMS_TO_TICKS(segs*1000));
     }
+#if PRINT_MSJ_WF_RADAR
     printf("end\r\n");
+#endif
 	ESP_ERROR_CHECK(esp_wifi_set_promiscuous(false));
-    printf("[%s:%d (%s)] Ejecuté esp_wifi_set_promiscuous(false)\n", __FILE__, __LINE__, __func__);
 
     ListElement* current = NULL;
     int size = maclist->count;
@@ -994,7 +1015,6 @@ driver_error_t *wifi_radar(int8_t *minsen, mac_t* *list, uint16_t * count,int se
              i++;
 	}
         ListFree(maclist);
-		printf("[%s:%d (%s)] Ejecuté ListFree(maclist)\n", __FILE__, __LINE__, __func__);
 
        *list =(mac_t*) malloc(sizeof(listt));
        memset(*list, '\0', sizeof(listt));
@@ -1003,9 +1023,14 @@ driver_error_t *wifi_radar(int8_t *minsen, mac_t* *list, uint16_t * count,int se
     *count = (unsigned int) size;
 
     //ESP_ERROR_CHECK(esp_wifi_set_promiscuous(false));
-	//printf("[%s:%d (%s)] Ejecuté esp_wifi_set_promiscuous(false)\n", __FILE__, __LINE__, __func__);
     if ((error = wifi_check_error(esp_wifi_stop()))) return error;
+#if PRINT_MSJ_DEBUG
+	printf("[%s:%d (%s)] WiFi Stopped\n", __FILE__, __LINE__, __func__);
+#endif
     if ((error = wifi_deinit())) return error;
+#if PRINT_MSJ_DEBUG
+	printf("[%s:%d (%s)] WiFi Deinited\n", __FILE__, __LINE__, __func__);
+#endif
     return NULL;
 }
 
@@ -1046,11 +1071,8 @@ driver_error_t *wifi_scan_channel(uint8_t channel, uint16_t *count, wifi_ap_reco
 
     if (channel > 13)
         channel = 0;
-    //if (channel == 0)
-    //    printf("Scanning all channels\n");
-    //else
-    //    printf("Scanning channel %d\n", channel);
-    wifi_scan_config_t conf = {
+    
+	wifi_scan_config_t conf = {
         .ssid = NULL,
         .bssid = NULL,
         .channel = channel,
@@ -1098,6 +1120,13 @@ driver_error_t *wifi_scan_channel(uint8_t channel, uint16_t *count, wifi_ap_reco
     }
 
     return NULL;
+}
+
+driver_error_t *wifi_get_mac_address(uint8_t *mac) {
+	if (!mac)
+		return wifi_check_error(ESP_ERR_INVALID_ARG);
+	esp_read_mac(mac, ESP_MAC_WIFI_STA);
+	return NULL;
 }
 // FIN Agregado
 

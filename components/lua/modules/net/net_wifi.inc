@@ -374,6 +374,7 @@ static int lwifi_stop(lua_State* L) {
 // Agregado: cabezal de wifi_radar para evitar warnings (para no agregarlo en drivers/wifi.h)
 // Implementación en components/sys/drivers/wifi.c
 driver_error_t *wifi_radar(int8_t *minsen, mac_t* *list, uint16_t * count,int segs,u8_t onlyData, uint8_t channel);
+#define PRINT_MSJ_WF_RADAR 0
 
 static int lwifi_radar(lua_State* L) {      
     driver_error_t *error;
@@ -392,10 +393,12 @@ static int lwifi_radar(lua_State* L) {
        //     se les restó 1 (ahora es de -1 a -5, antes era de -1 a -4)
        if (lua_isnumber(L, -1))
             channel = lua_tointeger(L, -1);
+#if PRINT_MSJ_WF_RADAR
        if (channel == 0)
             printf("Listen all channels\n");
        else
             printf("Listen channel %d\n", channel);
+#endif
        // FIN Agregado
        luaL_checktype(L, -2, LUA_TBOOLEAN);
        if (lua_toboolean(L, -2)) {
@@ -403,32 +406,40 @@ static int lwifi_radar(lua_State* L) {
        }
        if(lua_isnumber(L, -3)){
 	       rssi=lua_tointeger(L,-3);
-	       printf("Minimum rssi: %d \n",rssi) ;
+#if PRINT_MSJ_WF_RADAR
+	       printf("Minimum rssi: %d \n",rssi);
+#endif
        }
        if(lua_isnumber(L, -4)){
 	       segs=lua_tointeger(L,-4);
+#if PRINT_MSJ_WF_RADAR
 	       printf("Seconds per channel: %d\n",segs) ;
+#endif
        }
        luaL_checktype(L, -5, LUA_TBOOLEAN);
        if (lua_toboolean(L, -5)) {
             table = 1;
        }
     } 
-    else{
+    else {
         printf("syntax is radar(returnTable,listening seconds per channel,min rssi,onlyDataPackets,channel number)\n");
-	return 0;
+		return 0;
     }
     // Scan wifi
     if ((error = wifi_radar(&rssi, &maclist,&count,segs,onlyData,channel))) {
         return luaL_driver_error(L, error);
     }
-    printf("%d devices founded \n",count);
+#if PRINT_MSJ_WF_RADAR
+    printf("%d devices found\n", count);
+#endif
 
     if (table){
 	    lua_createtable(L, count, 0);
 	    for ( i = 0; i < count; i++) {     
 		       char * macl =  (char*)maclist[i].mac;
-		       printf("  list[%d] = %s\n", i,macl); 
+#if PRINT_MSJ_WF_RADAR
+		       printf("  list[%d] = %s\n", i,macl);
+#endif
 		       lua_pushstring(L, (char *)maclist[i].mac);
 		       lua_rawseti(L,-2,i+1); 
 			   free(maclist[i].mac);
@@ -436,7 +447,9 @@ static int lwifi_radar(lua_State* L) {
     } else {
 	    lua_pushinteger(L, count);
     }
+#if PRINT_MSJ_WF_RADAR
     printf("----\n");
+#endif
     lua_replace(L,1);
     lua_settop(L,1);
     if (maclist) {
@@ -531,6 +544,18 @@ static int lwifi_scan_channel(lua_State* L) {
     }
 
     return table;
+}
+
+// Implementación en components/sys/drivers/wifi.c
+driver_error_t *wifi_get_mac_address(uint8_t *mac);
+
+static int lwifi_get_mac_address(lua_State* L) {
+	uint8_t mac[6];
+	char mac_char[13];
+	wifi_get_mac_address(mac);
+	val_to_hex_string(mac_char, (char *)mac, sizeof(mac), 0);
+	lua_pushstring(L, mac_char);
+	return 1;
 }
 // FIN Agregado
 
@@ -728,6 +753,7 @@ static const LUA_REG_TYPE wifi_map[] = {
     { LSTRKEY( "stat"       ),     LFUNCVAL( lwifi_stat             ) },
     { LSTRKEY( "radar"      ),     LFUNCVAL( lwifi_radar            ) },
     { LSTRKEY( "scanch"     ),     LFUNCVAL( lwifi_scan_channel     ) }, // Agregado: análoga a scan con opción de elegir canal
+    { LSTRKEY( "getmacaddr" ),     LFUNCVAL( lwifi_get_mac_address  ) }, // Agregado: para obtener la MAC Address de la interfaz WiFi
 #if CONFIG_ESP32_WIFI_NVS_ENABLED
     // wps ssid+auth can only be stored to nvs
     // so if nvs is disabled, wps would have to be repeated on every boot
