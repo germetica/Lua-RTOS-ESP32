@@ -212,7 +212,7 @@ static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* param) 
 #endif
 				ble_scan_running = false;
 				// ESP_BT_STATUS_SUCCESS: parte del enumerado esp_bt_status_t (esp_bt_defs.h)
-				GAP_CB_CHECK(ESP_BT_STATUS_SUCCESS, evBT_SCAN_STOP_COMPLETE, evBT_SCAN_STOP_ERROR);
+				//GAP_CB_CHECK(ESP_BT_STATUS_SUCCESS, evBT_SCAN_STOP_COMPLETE, evBT_SCAN_STOP_ERROR);
 				break;
 			}
 
@@ -653,7 +653,7 @@ driver_error_t *bt_is_bredr_scanning(bool *isBrEdrScanning) {
 }
 
 
-// INI Agregado para obtener el BD_ADDR de este dispositivo
+// Agregado: para obtener el BD_ADDR de este dispositivo
 driver_error_t *bt_get_bdaddr(uint8_t *bd_addr ) {
     if (!bd_addr)
 		return driver_error(BT_DRIVER, BT_ERR_INVALID_ARGUMENT, NULL);
@@ -663,6 +663,19 @@ driver_error_t *bt_get_bdaddr(uint8_t *bd_addr ) {
     esp_read_mac(bd_addr, ESP_MAC_BT);
 	return NULL;
 }
-// FIN Agregado
+
+
+// Agregado: Para liberar la memoria del componente Bluetooth, en caso de que no se quiera usar
+// Valor devuelto: 0: Ok; 1: Error al liberar LE; 2: Error al liberar BR/EDR; 3: Error al liberar LE y BR/EDR
+uint8_t bt_free_mem() {
+	uint8_t error = 0x00;
+	if (esp_bt_controller_mem_release(ESP_BT_MODE_BLE) != ESP_OK) {
+		error |= 0x01;
+	}
+	if (esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT) != ESP_OK) {
+		error |= 0x02;
+	}
+	return error;
+}
 
 #endif

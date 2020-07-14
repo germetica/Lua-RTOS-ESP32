@@ -887,7 +887,8 @@ void wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type)
 #if PRINT_MSJ_WF_RADAR
 		printf("Device found: %s \n",  ((char*)(maclist->last->content)));
 #endif
-	}
+	} else
+		free(mac);
 }
 
 static void initialize_nvs()

@@ -356,6 +356,14 @@ static int lbt_is_bredr_scanning( lua_State* L) {
 }
 
 
+// Agregado: Para liberar la memoria del componente Bluetooth, en caso de que no se quiera usar 
+static int lbt_free_mem( lua_State* L ) {
+	uint8_t error = bt_free_mem();
+	lua_pushinteger(L, error);
+	return 1;
+}
+
+
 static int lbt_scan_stop( lua_State* L ) {
     driver_error_t *error;
 
@@ -451,6 +459,7 @@ static const LUA_REG_TYPE lbt_map[] = {
 	{ LSTRKEY( "attachdual"        ), LFUNCVAL( lbt_attach_dual       ) }, // Agregado: función attach en modo dual, para tener scan LE y BR/EDR
 	{ LSTRKEY( "isLeScanning"      ), LFUNCVAL( lbt_is_le_scanning    ) }, // Agregado: Indica si se está ejecutando un Scan LE 
 	{ LSTRKEY( "isBrEdrScanning"   ), LFUNCVAL( lbt_is_bredr_scanning ) }, // Agregado: Indica si se está ejecutando un Scan BR/EDR
+	{ LSTRKEY( "freemem"           ), LFUNCVAL( lbt_free_mem          ) }, // Agregado: Para liberar la memoria del componente Bluetooth, en caso de que no se quiera usar
 	{ LNILKEY, LNILVAL }
 };
 

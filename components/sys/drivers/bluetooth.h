@@ -139,6 +139,7 @@ driver_error_t *bt_scan_start_bredr(bt_scan_callback_t cb, int cb_id); // Agrega
 driver_error_t *bt_is_le_scanning(bool *isLeScanning); // Agregado: Indica si se está ejecutando un Scan LE
 driver_error_t *bt_is_bredr_scanning(bool *isBrEdrScanning); // Agregado: Indica si se está ejecutando un Scan BR/EDR
 driver_error_t *bt_get_bdaddr(uint8_t *bd_addr); // Agregado: Obtener BD_ADDR de este dispositivo
+uint8_t bt_free_mem(); // Agregado: Para liberar la memoria del componente Bluetooth, en caso de que no se quiera usar
 
 extern const int bt_errors;
 extern const int bt_error_map;
