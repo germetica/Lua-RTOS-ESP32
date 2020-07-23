@@ -902,8 +902,6 @@ static void initialize_nvs()
 }
 
 driver_error_t *wifi_radar(int8_t *minsen, mac_t* *list, uint16_t * count,int segs,u8_t onlyData, uint8_t channel) {
-	//if (macListMutex == NULL)
-	//	macListMutex = xSemaphoreCreateMutex();
     driver_error_t *error;
     *count=0;
     *list = NULL;

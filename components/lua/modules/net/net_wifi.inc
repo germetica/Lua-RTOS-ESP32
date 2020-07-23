@@ -422,8 +422,7 @@ static int lwifi_radar(lua_State* L) {
        }
     } 
     else {
-        printf("syntax is radar(returnTable,listening seconds per channel,min rssi,onlyDataPackets,channel number)\n");
-		return 0;
+		return luaL_error(L, "syntax is radar(returnTable,listening seconds per channel,min rssi,onlyDataPackets,channel number)");
     }
     // Scan wifi
     if ((error = wifi_radar(&rssi, &maclist,&count,segs,onlyData,channel))) {

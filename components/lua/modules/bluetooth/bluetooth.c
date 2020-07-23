@@ -178,14 +178,18 @@ static int lbt_attach( lua_State* L ) {
 static int lbt_attach_dual( lua_State* L ) {
 	driver_error_t *error;
 	
+	// bt_mode:
+	//   0: BLE; 1: BR/EDR; 2: Dual
+	uint8_t bt_mode = luaL_checkinteger(L, 1);
+	
 	// scan_bredr_mode:
 	//   0: Neither discoverable nor connectable
 	//   1: Connectable but not discoverable
 	//   2: both discoverable and connectable
-	uint8_t scan_bredr_mode = luaL_checkinteger(L, 1);
-	const char *dev_bredr_name = luaL_checkstring(L, 2);
+	uint8_t scan_bredr_mode = luaL_checkinteger(L, 2);
+	const char *dev_bredr_name = luaL_checkstring(L, 3);
 	
-    if ((error = bt_setup_dual(scan_bredr_mode, dev_bredr_name))) {
+    if ((error = bt_setup_dual(bt_mode, scan_bredr_mode, dev_bredr_name))) {
     	return luaL_driver_error(L, error);
     }
 	
@@ -292,7 +296,9 @@ static int lbt_scan_start( lua_State* L ) {
  */
 static int lbt_scan_set_le_duration( lua_State* L ) {
     uint32_t ble_duration  = luaL_checkinteger(L, 1);
-	bt_scan_set_le_duration(ble_duration);
+	uint16_t scan_interval = luaL_checkinteger(L, 2);
+	uint16_t scan_window   = luaL_checkinteger(L, 3);
+	bt_scan_set_le_duration(ble_duration, scan_interval, scan_window);
 	return 0;
 }
 static int lbt_scan_set_bredr_duration( lua_State* L ) {
@@ -338,6 +344,16 @@ static int lbt_scan_start_bredr( lua_State* L ) {
 }
 
 
+// Agregado: Detener Scan BR/EDR
+static int lbt_scan_stop_bredr( lua_State* L ) {
+	driver_error_t *error;
+	if ((error = bt_scan_stop_bredr())) {
+		return luaL_driver_error(L, error);
+	}
+	return 0;
+}
+
+
 // Agregado: Indica si se está ejecutando un Scan LE
 static int lbt_is_le_scanning( lua_State* L) {
 	bool isLeScanning;
@@ -358,9 +374,10 @@ static int lbt_is_bredr_scanning( lua_State* L) {
 
 // Agregado: Para liberar la memoria del componente Bluetooth, en caso de que no se quiera usar 
 static int lbt_free_mem( lua_State* L ) {
-	uint8_t error = bt_free_mem();
-	lua_pushinteger(L, error);
-	return 1;
+	driver_error_t *error;
+	if ((error = bt_free_mem()))
+		return luaL_driver_error(L, error);
+	return 0;
 }
 
 
@@ -432,6 +449,7 @@ static const LUA_REG_TYPE lbt_scan_map[] = {
 	{ LSTRKEY( "setBrEdrDuration" ), LFUNCVAL ( lbt_scan_set_bredr_duration ) }, // Agregado: Para asignar la duración del scan BR/EDR
 	{ LSTRKEY( "startLe"          ), LFUNCVAL ( lbt_scan_start_le           ) }, // Agregado: Iniciar scan LE
 	{ LSTRKEY( "startBrEdr"       ), LFUNCVAL ( lbt_scan_start_bredr        ) }, // Agregado: Iniciar scan BR/EDR
+	{ LSTRKEY( "stopBrEdr"        ), LFUNCVAL ( lbt_scan_stop_bredr         ) }, // Agregado: Detener scan BR/EDR
 	{ LNILKEY,LNILVAL }
 };
 

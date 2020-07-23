@@ -131,15 +131,16 @@ driver_error_t *bt_adv_start(bte_advertise_params_t params, uint8_t *adv_data, u
 driver_error_t *bt_adv_stop();
 driver_error_t *bt_scan_start(bt_scan_callback_t cb, int cb_id);
 driver_error_t *bt_scan_stop();
-driver_error_t *bt_setup_dual(uint8_t scan_bredr_mode, const char *dev_bredr_name); // Agregado: Setup para Modo dual
-driver_error_t *bt_scan_set_le_duration(uint32_t ble_duration); // Agregado: Setear duración de LE
+driver_error_t *bt_setup_dual(uint8_t bt_mode, uint8_t scan_bredr_mode, const char *dev_bredr_name); // Agregado: Setup para Modo dual
+driver_error_t *bt_scan_set_le_duration(uint32_t ble_duration, uint16_t scan_interval, uint16_t scan_window); // Agregado: Setear duración de LE
 driver_error_t *bt_scan_set_bredr_duration(uint8_t bredr_inq_len); // Agregado: Setear duración de BR/EDR Inquiry (*1.28 s)
 driver_error_t *bt_scan_start_le(bt_scan_callback_t cb, int cb_id); // Agregado: Scan LE
 driver_error_t *bt_scan_start_bredr(bt_scan_callback_t cb, int cb_id); // Agregado: Scan BR/EDR
+driver_error_t *bt_scan_stop_bredr(); // Agregado: Para detener un scan BR/EDR
 driver_error_t *bt_is_le_scanning(bool *isLeScanning); // Agregado: Indica si se está ejecutando un Scan LE
 driver_error_t *bt_is_bredr_scanning(bool *isBrEdrScanning); // Agregado: Indica si se está ejecutando un Scan BR/EDR
 driver_error_t *bt_get_bdaddr(uint8_t *bd_addr); // Agregado: Obtener BD_ADDR de este dispositivo
-uint8_t bt_free_mem(); // Agregado: Para liberar la memoria del componente Bluetooth, en caso de que no se quiera usar
+driver_error_t *bt_free_mem(); // Agregado: Para liberar la memoria del componente Bluetooth, en caso de que no se quiera usar
 
 extern const int bt_errors;
 extern const int bt_error_map;

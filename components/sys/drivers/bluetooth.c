@@ -96,6 +96,7 @@ if(s != ESP_BT_STATUS_SUCCESS) { \
 // Is BT setup?
 static uint8_t setup = 0;
 static uint8_t setup_dual = 0; // Agregado: Flag de si se configuró el modo Dual
+static esp_bt_mode_t bt_mode_set = ESP_BT_MODE_IDLE; // Agregado: Modo BT configurado
 
 // Event group to sync some driver functions with the event handler
 EventGroupHandle_t bt_event;
@@ -104,15 +105,30 @@ EventGroupHandle_t bt_event;
 static xQueueHandle queue = NULL;
 static TaskHandle_t task = NULL;
 
+// Tiempo a esperar cuando se envía a queue y ésta está llena.
+// Si se define en 0 (como estaba originalmente para BLE), se perderán paquetes si la función de callback LuaRTOS demora mucho en
+// procesar el frame y provoca que la cola se llene.
+// Si QUEUE_TICKS_TO_WAIT != 0, la función de callback LuaRTOS no debería demorar para evitar el llenado del buffer, además de la
+// pérdida de paquetes.
+// Si se define en portMAX_DELAY, al llenarse la cola, al intentar enviar se bloqueará hasta que haya lugar en la cola. Esto podría
+// bloquear indefinidamente el hilo que envía los paquetes a la función de callback del scan BT, provocando el llenado del buffer
+// y haciendo que se pierdan los demás paquetes.
+// Tener en cuenta que se usa la misma cola para BLE y BR/EDR.
+#define QUEUE_TICKS_TO_WAIT		(100/portTICK_PERIOD_MS)/*portMAX_DELAY*/
+
 bt_scan_callback_t callback;
 static int callback_id;
 
 // Para mostrar o no mensajes de debug
-#define MENSAJES_DEBUG      false
-static uint32_t ble_scan_duration = 0; // Agregado: Duración para escaneo BLE cuando se configuró con bt_setup_dual
-static uint8_t bredr_scan_inq_len = 1; // Agregado: Duración del Inquiry BR/EDR. La unidad son 1.28 s
-static bool ble_scan_running = false; // Agregado: Indica si se está ejecutando un Scan LE
-static bool bredr_scan_running = false; // Agregado: Indica si se está ejecutando un Scan BR/EDR
+#define MENSAJES_DEBUG			0
+#define BREDR_NOT_VALID_RSSI	-129		/* El rango válido del RSSI, según la API (esp_gap_bt_api.h), es -128 a 127 */
+#define BREDR_GET_BDNAME		0			/* Poner en 1 si se quiere obtener el nombre del dispositivo */
+static uint32_t ble_scan_duration = 0;		// Agregado: Duración para escaneo BLE cuando se configuró con bt_setup_dual
+static uint8_t bredr_scan_inq_len = 1;		// Agregado: Duración del Inquiry BR/EDR. La unidad son 1.28 s
+static bool ble_scan_running = false;		// Agregado: Indica si se está ejecutando un Scan LE
+static bool bredr_scan_running = false;		// Agregado: Indica si se está ejecutando un Scan BR/EDR
+static bool ble_scan_params_set = false;	// Agregado: Para saber si los parámetros de scan ya están seteados
+static bool ble_process_eddystone = true;	// Agregado: Con bt_setup_dual, no se va a a procesar Eddystone
 
 /*
  * Helper functions
@@ -162,6 +178,7 @@ static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* param) 
 
 		case ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT: {
 			uint32_t duration = !setup_dual ? 0 : ble_scan_duration;
+			ble_scan_params_set = true;
 			esp_ble_gap_start_scanning(duration);
 #if MENSAJES_DEBUG
 			printf("[%s:%d (%s)] [BLE_SCAN_PARM_SET_COMPLETE]\n", __FILE__, __LINE__, __func__);
@@ -201,8 +218,15 @@ static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* param) 
 #endif
 				// FIN Agregado
 
-				bt_eddystone_decode(scan_result->scan_rst.ble_adv, scan_result->scan_rst.adv_data_len, &frame);
-				xQueueSend(queue, &frame, 0);
+				if (ble_process_eddystone) {
+					bt_eddystone_decode(scan_result->scan_rst.ble_adv, scan_result->scan_rst.adv_data_len, &frame);
+				} else {
+					frame.frame_type = BTAdvUnknown;
+				}
+				//xQueueSend(queue, &frame, 0);
+				if (xQueueSend(queue, &frame, QUEUE_TICKS_TO_WAIT) != pdPASS) { // Originalmente, era 0. Sin espera si la cola está llena
+					printf("(%s) LE packet lost\n", __func__);
+				}
 
 				break;
 			}
@@ -285,6 +309,7 @@ driver_error_t *bt_setup(bt_mode_t mode) {
 
 
 // INI Agregado - setup Dual Mode (BR/EDR y LE)
+#if BREDR_GET_BDNAME
 static void getNameFromEir(uint8_t *eir, uint8_t *bdname, uint8_t *bdname_len)
 {
 	if (!eir || !bdname)
@@ -304,13 +329,16 @@ static void getNameFromEir(uint8_t *eir, uint8_t *bdname, uint8_t *bdname_len)
             *bdname_len = rmt_bdname_len;
     }
 }
+#endif
 
 
 static void getDeviceInfo(esp_bt_gap_cb_param_t *param, uint8_t *bdaddr, int *rssi, char *bdname, uint8_t *bdname_len) {
+#if BREDR_GET_BDNAME
 	uint8_t eir_len = 0;
     uint8_t eir[ESP_BT_GAP_EIR_DATA_LEN];
+#endif
 	
-	*rssi = -129; // No valido (los valores validos, para la API, son de -128 a 128)
+	*rssi = BREDR_NOT_VALID_RSSI;
 	*bdname_len = 0;
 	memcpy(bdaddr, param->disc_res.bda, ESP_BD_ADDR_LEN);
 	
@@ -321,6 +349,7 @@ static void getDeviceInfo(esp_bt_gap_cb_param_t *param, uint8_t *bdaddr, int *rs
          case ESP_BT_GAP_DEV_PROP_RSSI:
             *rssi = *(int8_t *)(p->val);
             break;
+#if BREDR_GET_BDNAME	/* Si no interesa el nombre del dispositivo, esta parte se excluye  */
 		 case ESP_BT_GAP_DEV_PROP_BDNAME: {
 			if (bdname) { // Si bdname es NULL, no se quiere el nombre
             	*bdname_len = (p->len > ESP_BT_GAP_MAX_BDNAME_LEN) ? ESP_BT_GAP_MAX_BDNAME_LEN : (uint8_t)p->len;
@@ -328,6 +357,8 @@ static void getDeviceInfo(esp_bt_gap_cb_param_t *param, uint8_t *bdaddr, int *rs
 			}
             break;
          }
+#endif
+#if BREDR_GET_BDNAME /* Por el momento, el EIR se usa solo para obtener el nombre */
          case ESP_BT_GAP_DEV_PROP_EIR: {
 			if (bdname) { // Si bdname es NULL, no se quiere el nombre
             	memcpy(eir, (uint8_t *)(p->val), p->len);
@@ -335,12 +366,15 @@ static void getDeviceInfo(esp_bt_gap_cb_param_t *param, uint8_t *bdaddr, int *rs
 			}
             break;
          }
+#endif
          default:
             break;
         }//switch
     }//for
+#if BREDR_GET_BDNAME
 	if (bdname && eir_len > 0 && *bdname_len == 0) // Si bdname es NULL, no se quiere el nombre
         getNameFromEir(eir, (uint8_t*)bdname, bdname_len);
+#endif
 }
 
 
@@ -352,7 +386,7 @@ void bt_bredr_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
 		frame.frame_type = BTAdvBrEdrInqRsp; // BR/EDR Inquiry Response
 		
 		// Datos BLE
-		frame.len = 0; frame.flags = 0; memset(frame.raw, 0, sizeof(frame.raw)); // frame.raw es un arreglo estático
+		frame.len = 0; frame.flags = 0;
 		
 		getDeviceInfo(param, frame.bd_addr, &frame.rssi, frame.data.bredr_inq_rsp.bdname, &frame.data.bredr_inq_rsp.bdname_len);
 		
@@ -361,7 +395,11 @@ void bt_bredr_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
         printStrLen(frame.data.bredr_inq_rsp.bdname, frame.data.bredr_inq_rsp.bdname_len, "    Nombre dispositivo: ", "    Dispositivo sin nombre", __FILE__, __LINE__);
 		printf("[%s:%d (%s)]     RSSI: %d\n", __FILE__, __LINE__, __func__, frame.rssi);
 #endif
-		xQueueSend(queue, &frame, 0);
+		if (frame.rssi != BREDR_NOT_VALID_RSSI) {
+			if (xQueueSend(queue, &frame, QUEUE_TICKS_TO_WAIT) != pdPASS) {
+				printf("(%s) BR/EDR packet lost\n", __func__);
+			}
+		}
         break;
      }
      case ESP_BT_GAP_DISC_STATE_CHANGED_EVT: {
@@ -388,31 +426,37 @@ void bt_bredr_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
 }
 
 
-driver_error_t *bt_setup_dual(uint8_t scan_bredr_mode, const char *dev_bredr_name) {
+/**
+ * @brief       Similar a bt_setup, pero permite configurar solo LE, solo BR/EDR o ambos. Libera la memoria del modo que no se va a usar. En caso
+ *              de que no se vaya a usar el componente Bluetooth, se recomienda ejecutar bt_freemem().
+ * @param[in]   bt_mode: 0: BLE; 1: BR/EDR; 2: Dual Mode
+ * @param[in]   scan_bredr_mode: Modo escaneable de BR/EDR: 0: ESP_BT_SCAN_MODE_NONE; 1: ESP_BT_SCAN_MODE_CONNECTABLE; 2: ESP_BT_SCAN_MODE_CONNECTABLE_DISCOVERABLE
+ * @param[in]   dev_bredr_name: Nombre del dispositivo para el modo BR/EDR (o dual) en caso de que quiera ser descubierto
+ */
+driver_error_t *bt_setup_dual(uint8_t bt_mode, uint8_t scan_bredr_mode, const char *dev_bredr_name) {
 	// Sanity checks
 	if (setup) {
 		return NULL;
 	}
-	
-	esp_bt_scan_mode_t esp_bt_scan_mode;
-	switch (scan_bredr_mode) {
-	 case 0:
-		esp_bt_scan_mode = ESP_BT_SCAN_MODE_NONE; /*!< Neither discoverable nor connectable */
-		break;
-	 case 1:
-		esp_bt_scan_mode = ESP_BT_SCAN_MODE_CONNECTABLE; /*!< Connectable but not discoverable */
-		break;
-	 case 2:
-		esp_bt_scan_mode = ESP_BT_SCAN_MODE_CONNECTABLE_DISCOVERABLE; /*!< both discoverable and connectable */
-		break;
-	 default:
+
+	if (bt_mode == 0) { // BLE
+		bt_mode_set = ESP_BT_MODE_BLE;
+		if (esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT) == ESP_OK) printf("ESP_BT_MODE_CLASSIC_BT memory released\n");
+		else printf("(%s) Error trying to release ESP_BT_MODE_CLASSIC_BT memory\n", __func__);
+	} else if (bt_mode == 1) { // BR/EDR
+		bt_mode_set = ESP_BT_MODE_CLASSIC_BT;
+		if (esp_bt_controller_mem_release(ESP_BT_MODE_BLE) == ESP_OK) printf("ESP_BT_MODE_BLE memory released\n");
+		else printf("(%s)] Error trying to release ESP_BT_MODE_BLE memory\n", __func__);
+	} else if (bt_mode == 2) { // Dual
+		bt_mode_set = ESP_BT_MODE_BTDM;
+	} else { // Otro
 		return driver_error(BT_DRIVER, BT_ERR_INVALID_ARGUMENT, NULL);
 	}
 	
 	// Create an event group sync some driver functions with the event handler
 	bt_event = xEventGroupCreate();
 	
-	queue = xQueueCreate(10, sizeof(bt_adv_frame_t));
+	queue = xQueueCreate(10, sizeof(bt_adv_frame_t)); // Máximo, 10 ítems del tamaño de bt_adv_frame_t
 	if (!queue)
 		return driver_error(BT_DRIVER, BT_ERR_NOT_ENOUGH_MEMORY, NULL);
 	
@@ -432,16 +476,33 @@ driver_error_t *bt_setup_dual(uint8_t scan_bredr_mode, const char *dev_bredr_nam
 	
     esp_bluedroid_init();
     esp_bluedroid_enable();
-	esp_ble_gap_register_callback(&gap_cb);
+
+	if (bt_mode_set == ESP_BT_MODE_BLE || bt_mode_set == ESP_BT_MODE_BTDM) { // LE o Dual
+		esp_ble_gap_register_callback(&gap_cb);
+	}
 	
 	// Configuración BR/EDR:
-		if (dev_bredr_name && strlen(dev_bredr_name) > 0)
-			esp_bt_dev_set_device_name(dev_bredr_name);
+	if (bt_mode_set == ESP_BT_MODE_CLASSIC_BT || bt_mode_set == ESP_BT_MODE_BTDM) { // BR/EDR o Dual
+		esp_bt_scan_mode_t esp_bt_scan_mode;
+		if (scan_bredr_mode == 0) {
+			esp_bt_scan_mode = ESP_BT_SCAN_MODE_NONE; /*!< Neither discoverable nor connectable */
+		} else if (scan_bredr_mode == 1) {
+			esp_bt_scan_mode = ESP_BT_SCAN_MODE_CONNECTABLE; /*!< Connectable but not discoverable */
+		} else if (scan_bredr_mode == 2) {
+			esp_bt_scan_mode = ESP_BT_SCAN_MODE_CONNECTABLE_DISCOVERABLE; /*!< both discoverable and connectable */
+			if (dev_bredr_name && strlen(dev_bredr_name) > 0) {
+				esp_bt_dev_set_device_name(dev_bredr_name);
+			}
+		} else
+			return driver_error(BT_DRIVER, BT_ERR_INVALID_ARGUMENT, NULL);
+		
 		/* set discoverable and connectable mode, wait to be connected */
 		esp_bt_gap_set_scan_mode(esp_bt_scan_mode);
 		/* register GAP callback function */
 		esp_bt_gap_register_callback(bt_bredr_cb);
+	}
 	
+	ble_process_eddystone = false;
 	setup = 1;
 	setup_dual = 1;
 	
@@ -556,9 +617,27 @@ driver_error_t *bt_scan_start(bt_scan_callback_t cb, int cb_id) {
 }
 
 
+static esp_ble_scan_params_t ble_scan_params = { // Agregado: Parámetros para scan LE
+    .scan_type              = BLE_SCAN_TYPE_PASSIVE,
+    .own_addr_type          = BLE_ADDR_TYPE_PUBLIC,
+    .scan_filter_policy     = BLE_SCAN_FILTER_ALLOW_ALL,
+    .scan_interval          = 0x50, // Scan interval. This is defined as the time interval from when the Controller started its last LE scan
+                                    // until it begins the subsequent LE scan. Range: 0x0004 to 0x4000
+                                    // Default: 0x0010 (10 ms) Time = N * 0.625 msec Time Range: 2.5 msec to 10.24 seconds
+    //--                            //--
+    .scan_window            = 0x30  // Scan window. The duration of the LE scan. LE_Scan_Window shall be less than or equal
+                                    // to LE_Scan_Interval Range: 0x0004 to 0x4000 Default: 0x0010 (10 ms)
+                                    // Time = N * 0.625 msec Time Range: 2.5 msec to 10240 msec
+    //.scan_duplicate         = BLE_SCAN_DUPLICATE_DISABLE
+};
+
+
 // Agregado: setear duración de scan LE y BR/EDR
-driver_error_t *bt_scan_set_le_duration(uint32_t ble_duration) {
-	ble_scan_duration  = ble_duration;
+driver_error_t *bt_scan_set_le_duration(uint32_t ble_duration, uint16_t scan_interval, uint16_t scan_window) {
+	ble_scan_duration             = ble_duration;
+	ble_scan_params.scan_interval = scan_interval;
+	ble_scan_params.scan_window   = scan_window;
+	ble_scan_params_set           = false;
 	return NULL;
 }
 driver_error_t *bt_scan_set_bredr_duration(uint8_t bredr_inq_len) {
@@ -567,19 +646,10 @@ driver_error_t *bt_scan_set_bredr_duration(uint8_t bredr_inq_len) {
 }
 
 
-static esp_ble_scan_params_t ble_scan_params = { // Agregado: Parámetros para scan LE
-    .scan_type              = BLE_SCAN_TYPE_PASSIVE,
-    .own_addr_type          = BLE_ADDR_TYPE_PUBLIC,
-    .scan_filter_policy     = BLE_SCAN_FILTER_ALLOW_ALL,
-    .scan_interval          = 0x50,
-    .scan_window            = 0x30,
-    //.scan_duplicate         = BLE_SCAN_DUPLICATE_DISABLE
-};
-
 // Agregado: Comenzar escaneo LE
 driver_error_t *bt_scan_start_le(bt_scan_callback_t cb, int cb_id) {
 	// Sanity checks
-	if (!setup_dual) {
+	if (bt_mode_set != ESP_BT_MODE_BTDM && bt_mode_set != ESP_BT_MODE_BLE) {
 		return driver_error(BT_DRIVER, BT_ERR_IS_NOT_SETUP, NULL);
 	}
 	
@@ -587,7 +657,11 @@ driver_error_t *bt_scan_start_le(bt_scan_callback_t cb, int cb_id) {
 	callback    = cb;
 	callback_id = cb_id;
 	
-	esp_ble_gap_set_scan_params(&ble_scan_params);
+	if (!ble_scan_params_set) {
+		esp_ble_gap_set_scan_params(&ble_scan_params);
+	} else {
+		esp_ble_gap_start_scanning(ble_scan_duration);
+	}
 	
 	// Wait for scan start completion
 	EventBits_t uxBits = xEventGroupWaitBits(bt_event, evBT_SCAN_START_COMPLETE | evBT_SCAN_START_ERROR, pdTRUE, pdFALSE, portMAX_DELAY);
@@ -603,7 +677,7 @@ driver_error_t *bt_scan_start_le(bt_scan_callback_t cb, int cb_id) {
 // Agregado: Comenzar escaneo BR/EDR
 driver_error_t *bt_scan_start_bredr(bt_scan_callback_t cb, int cb_id) {
 	// Sanity checks
-	if (!setup_dual) {
+	if (bt_mode_set != ESP_BT_MODE_BTDM && bt_mode_set != ESP_BT_MODE_CLASSIC_BT) {
 		return driver_error(BT_DRIVER, BT_ERR_IS_NOT_SETUP, NULL);
 	}
 	
@@ -612,12 +686,15 @@ driver_error_t *bt_scan_start_bredr(bt_scan_callback_t cb, int cb_id) {
 	callback_id = cb_id;
 	
 	/* start to discover nearby Bluetooth devices */
-	esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, bredr_scan_inq_len, 0);
-	
+	esp_err_t error;
+	if ((error = esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, bredr_scan_inq_len, 0))) {
+		return driver_error(BT_DRIVER, BT_ERR_CANT_START_SCAN, NULL);
+	}
 	return NULL;
 }
 
 
+// Sirve si se inició con bt_scan_start_le o con bt_scan_start
 driver_error_t *bt_scan_stop() {
 	// Sanity checks
 	if (!setup) {
@@ -639,7 +716,20 @@ driver_error_t *bt_scan_stop() {
 }
 
 
-// Agregado: Indica si se está ejecutando un Scan LE
+// Agregado: Detener un Scan BR/EDR
+driver_error_t *bt_scan_stop_bredr() {
+	if (!setup) {
+		return driver_error(BT_DRIVER, BT_ERR_IS_NOT_SETUP, NULL);
+	}
+	esp_err_t error;
+	if ((error = esp_bt_gap_cancel_discovery())) {
+		return driver_error(BT_DRIVER, BT_ERR_CANT_STOP_SCAN, NULL);
+	}
+	return NULL;
+}
+
+
+// Agregado: Indica si se está ejecutando un Scan LE (debe haberse iniciado con bt_scan_start_le)
 driver_error_t *bt_is_le_scanning(bool *isLeScanning) {
 	*isLeScanning = ble_scan_running;
 	return NULL;
@@ -654,7 +744,7 @@ driver_error_t *bt_is_bredr_scanning(bool *isBrEdrScanning) {
 
 
 // Agregado: para obtener el BD_ADDR de este dispositivo
-driver_error_t *bt_get_bdaddr(uint8_t *bd_addr ) {
+driver_error_t *bt_get_bdaddr(uint8_t *bd_addr) {
     if (!bd_addr)
 		return driver_error(BT_DRIVER, BT_ERR_INVALID_ARGUMENT, NULL);
 	// esp-idf/components/esp32/include/esp_system.h:
@@ -665,17 +755,21 @@ driver_error_t *bt_get_bdaddr(uint8_t *bd_addr ) {
 }
 
 
-// Agregado: Para liberar la memoria del componente Bluetooth, en caso de que no se quiera usar
-// Valor devuelto: 0: Ok; 1: Error al liberar LE; 2: Error al liberar BR/EDR; 3: Error al liberar LE y BR/EDR
-uint8_t bt_free_mem() {
-	uint8_t error = 0x00;
-	if (esp_bt_controller_mem_release(ESP_BT_MODE_BLE) != ESP_OK) {
-		error |= 0x01;
+// Libera toda la memoria de Bluetooth. No se puede deshacer hasta el siguiente reinicio. Si se va a usar sólo uno de los modos (BLE o BR/EDR),
+// al ejecutar bt_setup_dual, se libera la memoria del modo no utilizado.
+// Precondición: No puede haber sido inicializado.
+driver_error_t *bt_free_mem() {
+	if (setup_dual) {
+		esp_bluedroid_disable();
+		esp_bluedroid_deinit();
+		esp_bt_controller_disable();
+		esp_bt_controller_deinit();
 	}
-	if (esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT) != ESP_OK) {
-		error |= 0x02;
-	}
-	return error;
+	if (esp_bt_mem_release(ESP_BT_MODE_BTDM) == ESP_OK)
+		printf("Bluetooth memory released\n");
+	else
+		printf("Error releasing Bluetooth memory\n");
+	return NULL;
 }
 
 #endif
