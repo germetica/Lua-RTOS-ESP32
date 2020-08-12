@@ -119,11 +119,13 @@ enum { DR_DFLTMIN = DR_SF8C };
 enum { DR_PAGE = DR_PAGE_US915 };
 
 // Default frequency plan for US 915MHz
-enum { US915_125kHz_UPFBASE = 923300000,
+#define FRECUENCIA 923300000 /* Canal 1 */
+//#define FRECUENCIA 923900000 /* Canal 2 */
+enum { US915_125kHz_UPFBASE = FRECUENCIA,
        US915_125kHz_UPFSTEP =         0,
-       US915_500kHz_UPFBASE = 923300000,
+       US915_500kHz_UPFBASE = FRECUENCIA,
        US915_500kHz_UPFSTEP =         0,
-       US915_500kHz_DNFBASE = 923300000,
+       US915_500kHz_DNFBASE = FRECUENCIA,
        US915_500kHz_DNFSTEP =         0
 };
 enum { US915_FREQ_MIN = 902000000,
