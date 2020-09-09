@@ -118,18 +118,49 @@ enum _dr_us915_t { DR_SF10=0, DR_SF9, DR_SF8, DR_SF7, DR_SF8C, DR_NONE,
 enum { DR_DFLTMIN = DR_SF8C };
 enum { DR_PAGE = DR_PAGE_US915 };
 
-// Default frequency plan for US 915MHz
-#define FRECUENCIA 923300000 /* Canal 1 */
-//#define FRECUENCIA 923900000 /* Canal 2 */
-enum { US915_125kHz_UPFBASE = FRECUENCIA,
-       US915_125kHz_UPFSTEP =         0,
-       US915_500kHz_UPFBASE = FRECUENCIA,
-       US915_500kHz_UPFSTEP =         0,
-       US915_500kHz_DNFBASE = FRECUENCIA,
-       US915_500kHz_DNFSTEP =         0
+/**
+ * MULTICANAL_AU915 y UN_CANAL_FRECUENCIA: Definir solo uno, según cuál quiera usarse
+ * 
+ * Canales de Uplink: 0..63 de 125 KHz, cada 200 KHz (de 915.2 MHz a 927.8 MHz), y 64..71 de 500 KHz cada 1.6 MHz (de 915.9 MHz a 927.1 MHz)
+ * Canales de Downlink: 0..7 de 500 KHz, cada 600 KHz (de 923.3 MHz a 927.5 MHz)
+ */
+//#define MULTICANAL_AU915 1
+//#define UN_CANAL_FRECUENCIA 915200000 /* Un canal: Canal Uplink 0 */
+//#define UN_CANAL_FRECUENCIA 915400000 /* Un canal: Canal Uplink 1 */
+//#define UN_CANAL_FRECUENCIA 915600000 /* Un canal: Canal Uplink 2 */
+#define UN_CANAL_FRECUENCIA 915800000 /* Un canal: Canal Uplink 3 */
+//...
+//#define UN_CANAL_FRECUENCIA 916800000 /* Un canal: Canal Uplink 8 */
+//... Son 71 canales para uplink (0..63: 125KHz, cada 200KHz, y 64..71 500KHz cada 1.6MHz)
+//--
+//#define UN_CANAL_FRECUENCIA 923300000 /* Un canal: Canal Downlink 0 */
+//#define UN_CANAL_FRECUENCIA 923900000 /* Un canal: Canal Downlink 1 */
+//#define UN_CANAL_FRECUENCIA 924500000 /* Un canal: Canal Downlink 2 */
+
+#if defined(UN_CANAL_FRECUENCIA) && defined(MULTICANAL_AU915)
+#error "Definir solo una de las macros: UN_CANAL_FRECUENCIA o MULTICANAL_AU915, pero no ambas"
+#endif
+#if defined(UN_CANAL_FRECUENCIA)
+// Frecuencias para un único canal:
+enum { US915_125kHz_UPFBASE = UN_CANAL_FRECUENCIA,
+       US915_125kHz_UPFSTEP =    0,
+       US915_500kHz_UPFBASE = UN_CANAL_FRECUENCIA,
+       US915_500kHz_UPFSTEP =    0,
+       US915_500kHz_DNFBASE = 923300000,
+       US915_500kHz_DNFSTEP =    0
 };
+#elif defined(MULTICANAL_AU915)
+// Default frequency plan for AU 915MHz
+enum { US915_125kHz_UPFBASE = 915200000,
+       US915_125kHz_UPFSTEP =    200000,
+       US915_500kHz_UPFBASE = 915900000,
+       US915_500kHz_UPFSTEP =   1600000,
+       US915_500kHz_DNFBASE = 923300000,
+       US915_500kHz_DNFSTEP =    600000
+};
+#endif
 enum { US915_FREQ_MIN = 902000000,
-       US915_FREQ_MAX = 928000000 }; // Ver si no hay que establecer también la máxima y la mínima en 923300000
+       US915_FREQ_MAX = 928000000 };
 
 enum { CHNL_PING         = 0 }; // used only for default init of state (follows beacon - rotating)
 enum { FREQ_PING         = US915_500kHz_DNFBASE + CHNL_PING*US915_500kHz_DNFSTEP };  // default ping freq
