@@ -124,11 +124,11 @@ enum { DR_PAGE = DR_PAGE_US915 };
  * Canales de Uplink: 0..63 de 125 KHz, cada 200 KHz (de 915.2 MHz a 927.8 MHz), y 64..71 de 500 KHz cada 1.6 MHz (de 915.9 MHz a 927.1 MHz)
  * Canales de Downlink: 0..7 de 500 KHz, cada 600 KHz (de 923.3 MHz a 927.5 MHz)
  */
-//#define MULTICANAL_AU915 1
+#define MULTICANAL_AU915 1
 //#define UN_CANAL_FRECUENCIA 915200000 /* Un canal: Canal Uplink 0 */
 //#define UN_CANAL_FRECUENCIA 915400000 /* Un canal: Canal Uplink 1 */
 //#define UN_CANAL_FRECUENCIA 915600000 /* Un canal: Canal Uplink 2 */
-#define UN_CANAL_FRECUENCIA 915800000 /* Un canal: Canal Uplink 3 */
+//#define UN_CANAL_FRECUENCIA 915800000 /* Un canal: Canal Uplink 3 */
 //...
 //#define UN_CANAL_FRECUENCIA 916800000 /* Un canal: Canal Uplink 8 */
 //... Son 71 canales para uplink (0..63: 125KHz, cada 200KHz, y 64..71 500KHz cada 1.6MHz)
