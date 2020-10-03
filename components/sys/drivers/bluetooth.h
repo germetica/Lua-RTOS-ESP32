@@ -134,6 +134,7 @@ driver_error_t *bt_scan_stop();
 driver_error_t *bt_setup_dual(uint8_t bt_mode, uint8_t scan_bredr_mode, const char *dev_bredr_name); // Agregado: Setup para Modo dual
 driver_error_t *bt_scan_set_le_duration(uint32_t ble_duration, uint16_t scan_interval, uint16_t scan_window); // Agregado: Setear duración de LE
 driver_error_t *bt_scan_set_bredr_duration(uint8_t bredr_inq_len); // Agregado: Setear duración de BR/EDR Inquiry (*1.28 s)
+driver_error_t *bt_scan_set_min_rssi(int min_rssi); // Agregado: Setear el valor mínimo de RSSI permitido para Scan LE y Discovery BR/EDR (0 es sin mínimo)
 driver_error_t *bt_scan_start_le(bt_scan_callback_t cb, int cb_id); // Agregado: Scan LE
 driver_error_t *bt_scan_start_bredr(bt_scan_callback_t cb, int cb_id); // Agregado: Scan BR/EDR
 driver_error_t *bt_scan_stop_bredr(); // Agregado: Para detener un scan BR/EDR

@@ -121,7 +121,8 @@ static int callback_id;
 
 // Para mostrar o no mensajes de debug
 #define MENSAJES_DEBUG			0
-#define BREDR_NOT_VALID_RSSI	-129		/* El rango válido del RSSI, según la API (esp_gap_bt_api.h), es -128 a 127 */
+#define BREDR_MIN_VALID_RSSI	-128		/* Según la API (esp_gap_bt_api.h), el intervalo válido del RSSI para BR/EDR es [-128, 127] */
+#define BREDR_MAX_VALID_RSSI	 127
 #define BREDR_GET_BDNAME		0			/* Poner en 1 si se quiere obtener el nombre del dispositivo */
 static uint32_t ble_scan_duration = 0;		// Agregado: Duración para escaneo BLE cuando se configuró con bt_setup_dual
 static uint8_t bredr_scan_inq_len = 1;		// Agregado: Duración del Inquiry BR/EDR. La unidad son 1.28 s
@@ -129,6 +130,7 @@ static bool ble_scan_running = false;		// Agregado: Indica si se está ejecutand
 static bool bredr_scan_running = false;		// Agregado: Indica si se está ejecutando un Scan BR/EDR
 static bool ble_scan_params_set = false;	// Agregado: Para saber si los parámetros de scan ya están seteados
 static bool ble_process_eddystone = true;	// Agregado: Con bt_setup_dual, no se va a a procesar Eddystone
+static int scan_min_rssi = 0;				// Agregado: Setear el valor mínimo de RSSI permitido para Scan LE y Discovery BR/EDR (0 es sin mínimo)
 
 /*
  * Helper functions
@@ -201,31 +203,33 @@ static void gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t* param) 
 
 		switch (scan_result->scan_rst.search_evt) {
 			case ESP_GAP_SEARCH_INQ_RES_EVT: {
-				bt_adv_frame_t frame;
+				if (scan_min_rssi == 0 || scan_result->scan_rst.rssi >= scan_min_rssi) {
+					bt_adv_frame_t frame;
 
-				// Get RSSI
-				frame.rssi = scan_result->scan_rst.rssi;
+					// Get RSSI
+					frame.rssi = scan_result->scan_rst.rssi;
 
-				// Get raw data
-				frame.len = scan_result->scan_rst.adv_data_len;
-				memcpy(frame.raw, scan_result->scan_rst.ble_adv, frame.len);
-				// INI Agregado: se asigna nuevo campo con BD_ADDR del dispositivo visto
-				memcpy(frame.bd_addr, scan_result->scan_rst.bda, 6);
+					// Get raw data
+					frame.len = scan_result->scan_rst.adv_data_len;
+					memcpy(frame.raw, scan_result->scan_rst.ble_adv, frame.len);
+					// INI Agregado: se asigna nuevo campo con BD_ADDR del dispositivo visto
+					memcpy(frame.bd_addr, scan_result->scan_rst.bda, 6);
 #if MENSAJES_DEBUG
-					uint8_t *bda = frame.bd_addr; // BD_ADDR del emisor
-					printf("[%s:%d (%s)] bd_addr: %02x:%02x:%02x:%02x:%02x:%02x | RSSI: %d\n", __FILE__, __LINE__, __func__,
-							bda[0],bda[1],bda[2],bda[3],bda[4],bda[5], scan_result->scan_rst.rssi);
+						uint8_t *bda = frame.bd_addr; // BD_ADDR del emisor
+						printf("[%s:%d (%s)] bd_addr: %02x:%02x:%02x:%02x:%02x:%02x | RSSI: %d\n", __FILE__, __LINE__, __func__,
+								bda[0],bda[1],bda[2],bda[3],bda[4],bda[5], scan_result->scan_rst.rssi);
 #endif
-				// FIN Agregado
+					// FIN Agregado
 
-				if (ble_process_eddystone) {
-					bt_eddystone_decode(scan_result->scan_rst.ble_adv, scan_result->scan_rst.adv_data_len, &frame);
-				} else {
-					frame.frame_type = BTAdvUnknown;
-				}
-				//xQueueSend(queue, &frame, 0);
-				if (xQueueSend(queue, &frame, QUEUE_TICKS_TO_WAIT) != pdPASS) { // Originalmente, era 0. Sin espera si la cola está llena
-					printf("(%s) LE packet lost\n", __func__);
+					if (ble_process_eddystone) {
+						bt_eddystone_decode(scan_result->scan_rst.ble_adv, scan_result->scan_rst.adv_data_len, &frame);
+					} else {
+						frame.frame_type = BTAdvUnknown;
+					}
+					//xQueueSend(queue, &frame, 0);
+					if (xQueueSend(queue, &frame, QUEUE_TICKS_TO_WAIT) != pdPASS) { // Originalmente, era 0. Sin espera si la cola está llena
+						printf("(%s) LE packet lost\n", __func__);
+					}
 				}
 
 				break;
@@ -338,7 +342,7 @@ static void getDeviceInfo(esp_bt_gap_cb_param_t *param, uint8_t *bdaddr, int *rs
     uint8_t eir[ESP_BT_GAP_EIR_DATA_LEN];
 #endif
 	
-	*rssi = BREDR_NOT_VALID_RSSI;
+	*rssi = BREDR_MIN_VALID_RSSI - 1;
 	*bdname_len = 0;
 	memcpy(bdaddr, param->disc_res.bda, ESP_BD_ADDR_LEN);
 	
@@ -349,7 +353,7 @@ static void getDeviceInfo(esp_bt_gap_cb_param_t *param, uint8_t *bdaddr, int *rs
          case ESP_BT_GAP_DEV_PROP_RSSI:
             *rssi = *(int8_t *)(p->val);
             break;
-#if BREDR_GET_BDNAME	/* Si no interesa el nombre del dispositivo, esta parte se excluye  */
+#if BREDR_GET_BDNAME	/* Si no interesa el nombre del dispositivo, esta parte se excluye */
 		 case ESP_BT_GAP_DEV_PROP_BDNAME: {
 			if (bdname) { // Si bdname es NULL, no se quiere el nombre
             	*bdname_len = (p->len > ESP_BT_GAP_MAX_BDNAME_LEN) ? ESP_BT_GAP_MAX_BDNAME_LEN : (uint8_t)p->len;
@@ -395,9 +399,11 @@ void bt_bredr_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
         printStrLen(frame.data.bredr_inq_rsp.bdname, frame.data.bredr_inq_rsp.bdname_len, "    Nombre dispositivo: ", "    Dispositivo sin nombre", __FILE__, __LINE__);
 		printf("[%s:%d (%s)]     RSSI: %d\n", __FILE__, __LINE__, __func__, frame.rssi);
 #endif
-		if (frame.rssi != BREDR_NOT_VALID_RSSI) {
-			if (xQueueSend(queue, &frame, QUEUE_TICKS_TO_WAIT) != pdPASS) {
-				printf("(%s) BR/EDR packet lost\n", __func__);
+		if (BREDR_MIN_VALID_RSSI <= frame.rssi && frame.rssi <= BREDR_MAX_VALID_RSSI) {
+			if (scan_min_rssi == 0 || frame.rssi >= scan_min_rssi) {
+				if (xQueueSend(queue, &frame, QUEUE_TICKS_TO_WAIT) != pdPASS) {
+					printf("(%s) BR/EDR packet lost\n", __func__);
+				}
 			}
 		}
         break;
@@ -643,6 +649,13 @@ driver_error_t *bt_scan_set_le_duration(uint32_t ble_duration, uint16_t scan_int
 driver_error_t *bt_scan_set_bredr_duration(uint8_t bredr_inq_len) {
     bredr_scan_inq_len = bredr_inq_len;
     return NULL;
+}
+
+
+// Agregado: Setear el valor mínimo de RSSI permitido para Scan LE y Discovery BR/EDR (0 es sin mínimo)
+driver_error_t *bt_scan_set_min_rssi(int min_rssi) {
+	scan_min_rssi = min_rssi;
+	return NULL;
 }
 
 

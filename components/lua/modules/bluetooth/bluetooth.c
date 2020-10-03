@@ -308,6 +308,14 @@ static int lbt_scan_set_bredr_duration( lua_State* L ) {
 }
 
 
+// Agregado: Setear el valor mínimo de RSSI permitido para Scan LE y Discovery BR/EDR (0 es sin mínimo)
+static int lbt_scan_set_min_rssi( lua_State* L  ) {
+	int min_rssi = luaL_checkinteger(L, 1);
+	bt_scan_set_min_rssi(min_rssi);
+	return 0;
+}
+
+
 // Agregado: Scan LE
 static int lbt_scan_start_le( lua_State* L ) {
     driver_error_t *error;
@@ -447,6 +455,7 @@ static const LUA_REG_TYPE lbt_scan_map[] = {
 	{ LSTRKEY( "stop"  ), LFUNCVAL ( lbt_scan_stop  ) },
 	{ LSTRKEY( "setLeDuration"    ), LFUNCVAL ( lbt_scan_set_le_duration    ) }, // Agregado: Para asignar la duración del scan LE
 	{ LSTRKEY( "setBrEdrDuration" ), LFUNCVAL ( lbt_scan_set_bredr_duration ) }, // Agregado: Para asignar la duración del scan BR/EDR
+	{ LSTRKEY( "setMinRssi"       ), LFUNCVAL ( lbt_scan_set_min_rssi       ) }, // Agregado: Para establecer un mínimo RSSI en scan LE o discovery BR/EDR
 	{ LSTRKEY( "startLe"          ), LFUNCVAL ( lbt_scan_start_le           ) }, // Agregado: Iniciar scan LE
 	{ LSTRKEY( "startBrEdr"       ), LFUNCVAL ( lbt_scan_start_bredr        ) }, // Agregado: Iniciar scan BR/EDR
 	{ LSTRKEY( "stopBrEdr"        ), LFUNCVAL ( lbt_scan_stop_bredr         ) }, // Agregado: Detener scan BR/EDR
