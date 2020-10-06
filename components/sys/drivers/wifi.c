@@ -106,10 +106,18 @@ typedef struct {
     char * mac;
 } mac_t;
 
+typedef struct {
+	char mac[13]; // Primer campo para comparar el estructurado como char* (macCompare)
+	int rssi_count;
+	double rssi;
+} mac_list_item_t;
+
 #include "LinkedList.h"
+#include <math.h>
 
 static List* maclist;
-static int8_t rssimin; 
+static int8_t rssimin;
+static uint8_t radar_rssi_policy = 0; // 0: Primer valor obtenido. 1: Último valor obtenido. 2: Promedio de los valores obtenidos.
 #define PRINT_MSJ_DEBUG 0
 #define PRINT_MSJ_WF_RADAR 0
 
@@ -822,28 +830,12 @@ char *mac2str(const unsigned char *mac,const signed rssi)
 		*buf++ = hex[val & 0xf];
 	}
 	
-	char rssibuf[5];
-	sprintf(rssibuf,"%d",rssi);
-
-	*buf++ = '|';
-	for (i = 0; i < strlen(rssibuf); i++)
-	{
-		*buf++ = rssibuf[i];
-	}
-
 	*buf = '\0';
 	return buffer;
 }
 
-int macCompare(void* a, void* b)
-{
-        char amac[13];
-        char bmac[13];
-        strncpy(amac,a,12);
-        strncpy(bmac,b,12);
-        amac[12]='\0';
-        bmac[12]='\0';
-        return strcmp(amac,bmac) == 0;
+int macCompare(void* a, void* b) {
+	return strncmp(a, b, 12) == 0;
 }
 
 void wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type)
@@ -854,41 +846,59 @@ void wifi_promiscuous_cb(void *buf, wifi_promiscuous_pkt_type_t type)
 	signed rssi = ((wifi_promiscuous_pkt_t *)buf)->rx_ctrl.rssi;
 	if (rssi < rssimin)
 		return;
-	char *mac;
+	mac_list_item_t *mac = malloc(sizeof(mac_list_item_t));
 	if (pkkt->to_ds==1 && pkkt->from_ds==0){
-		mac = strdup(mac2str(pkkt->addr2,rssi));	 
+		strcpy(mac->mac, mac2str(pkkt->addr2,rssi));
 	} else if (pkkt->to_ds==1 && pkkt->from_ds==1){
-		mac = strdup(mac2str(pkkt->addr4,rssi));
+		strcpy(mac->mac, mac2str(pkkt->addr4,rssi));
 	} else if (pkkt->to_ds==0 && pkkt->from_ds==1){	
-		mac = strdup(mac2str(pkkt->addr1,rssi));
+		strcpy(mac->mac, mac2str(pkkt->addr1,rssi));
 		char macipv4[7];
-		strncpy(macipv4,mac,6);
+		strncpy(macipv4,mac->mac,6);
 		macipv4[6]='\0';
 		char macipv6[5];
-		strncpy(macipv6,mac,4);
+		strncpy(macipv6,mac->mac,4);
 		macipv6[4]='\0';
 		// exclude mac if destination is broadcast
-		if (macCompare(mac,"FFFFFFFFFFFF")){
+		if (macCompare(mac->mac,"FFFFFFFFFFFF")){
+			free(mac);
 			mac = NULL;	
 		// or multicast 
 		} else if (strcmp(macipv4,"01005E")==0 || strcmp(macipv6,"3333")==0 ) {
+			free(mac);
 			mac = NULL;
 		}
 	} else if (pkkt->to_ds==0 && pkkt->from_ds==0){
-		mac = strdup(mac2str(pkkt->addr2,rssi));
+		strcpy(mac->mac, mac2str(pkkt->addr2,rssi));
 	} else {
+		free(mac);
 		mac = NULL;
 	}
 	if (mac == NULL)
 		return;
 
-	if (!ListFindItem(maclist,mac,macCompare)){
-		ListAppend(maclist, (void*)mac, strlen(mac)+1);
-#if PRINT_MSJ_WF_RADAR
-		printf("Device found: %s \n",  ((char*)(maclist->last->content)));
-#endif
-	} else
+	ListElement* list_element = ListFindItem(maclist, mac, macCompare); // macCompare compara strings, y mac->mac es el primer elemento del struct
+	if (list_element) {
+		if (radar_rssi_policy == 0) { // Primer valor obtenido
+			// Nada
+		} else {
+			mac_list_item_t *mac_list_item = (mac_list_item_t*)list_element->content;
+			if (radar_rssi_policy == 1) { // Último valor obtenido
+				mac_list_item->rssi = rssi;
+			} else { // Promedio de los valores obtenidos
+				mac_list_item->rssi = ((mac_list_item->rssi * mac_list_item->rssi_count) + rssi) / (mac_list_item->rssi_count+1);
+				mac_list_item->rssi_count++;
+			}
+		}
 		free(mac);
+	} else {
+		mac->rssi_count = 1;
+		mac->rssi       = rssi;
+		ListAppend(maclist, (void*)mac, sizeof(mac_list_item_t));
+#if PRINT_MSJ_WF_RADAR
+		printf("Device found: %s|%d\n", mac->mac, (int)mac->rssi); // Puede no ser el valor de rssi definitivo
+#endif
+	}
 }
 
 static void initialize_nvs()
@@ -901,12 +911,16 @@ static void initialize_nvs()
     ESP_ERROR_CHECK(err);
 }
 
-driver_error_t *wifi_radar(int8_t *minsen, mac_t* *list, uint16_t * count,int segs,u8_t onlyData, uint8_t channel) {
+driver_error_t *wifi_radar(int8_t *minsen, mac_t* *list, uint16_t * count,int segs,u8_t onlyData, uint8_t channel, uint8_t rssi_policy) {
+	if (rssi_policy > 2)
+		return driver_error(WIFI_DRIVER, WIFI_ERR_INVALID_ARGUMENT, "rssi_policy: valid values: 0: first value; 1: last value; 2: average");
+	
     driver_error_t *error;
     *count=0;
     *list = NULL;
     
     rssimin = *minsen;
+	radar_rssi_policy = rssi_policy;
 
     //<ver_si_es_necesario>//initialize_nvs();
 
@@ -1000,27 +1014,33 @@ driver_error_t *wifi_radar(int8_t *minsen, mac_t* *list, uint16_t * count,int se
     printf("end\r\n");
 #endif
 	ESP_ERROR_CHECK(esp_wifi_set_promiscuous(false));
+	delay(50); // Espero un poco, porque el promiscuous callback puede seguir recibiendo datos
 
     ListElement* current = NULL;
     int size = maclist->count;
     char * listt[size];
 
-    if (size>0){
-        int i=0;
-	while (ListNextElement(maclist, &current) != NULL){
-	     char * mac =  ((char*)(current->content));
-             listt[i]=malloc(strlen(mac)+1); // La mac, luego habrá que hacer free
-             strcpy(listt[i],mac);
-             i++;
-	}
-        ListFree(maclist);
-
-       *list =(mac_t*) malloc(sizeof(listt));
-       memset(*list, '\0', sizeof(listt));
-       memcpy(*list,listt,sizeof(listt));      // Se están copiando los punteros, no las "mac|rssi" 
+    if (size > 0) {
+		int i = 0;
+		while (ListNextElement(maclist, &current) != NULL) {
+			mac_list_item_t *list_item = (mac_list_item_t*)current->content;
+			int rssi = (int)((rssi_policy == 2) ? round(list_item->rssi) : list_item->rssi);
+			
+	    	//char *mac =  ((char*)(current->content));
+        	//listt[i] = malloc(strlen(mac)+1); // La mac, luego habrá que hacer free
+			listt[i] = malloc(18); // 12:mac + 1:pipe + 4:rssi + 1:null
+        	//strcpy(listt[i], mac);
+			sprintf(listt[i], "%s|%d", list_item->mac, rssi);
+        	i++;
+		}
+    	ListFree(maclist);
+		
+    	*list =(mac_t*) malloc(sizeof(listt));
+    	memset(*list, '\0', sizeof(listt));
+    	memcpy(*list,listt,sizeof(listt));      // Se están copiando los punteros, no las "mac|rssi" 
     }
-    *count = (unsigned int) size;
-
+    *count = (unsigned int)size;
+	
     //ESP_ERROR_CHECK(esp_wifi_set_promiscuous(false));
     if ((error = wifi_check_error(esp_wifi_stop()))) return error;
 #if PRINT_MSJ_DEBUG

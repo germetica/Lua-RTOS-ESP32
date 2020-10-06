@@ -373,7 +373,7 @@ static int lwifi_stop(lua_State* L) {
 
 // Agregado: cabezal de wifi_radar para evitar warnings (para no agregarlo en drivers/wifi.h)
 // Implementación en components/sys/drivers/wifi.c
-driver_error_t *wifi_radar(int8_t *minsen, mac_t* *list, uint16_t * count,int segs,u8_t onlyData, uint8_t channel);
+driver_error_t *wifi_radar(int8_t *minsen, mac_t* *list, uint16_t * count,int segs,u8_t onlyData, uint8_t channel, uint8_t rssi_policy);
 #define PRINT_MSJ_WF_RADAR 0
 
 static int lwifi_radar(lua_State* L) {      
@@ -385,14 +385,17 @@ static int lwifi_radar(lua_State* L) {
     int8_t rssi; // el RSSI es con signo
     uint8_t segs;
     uint8_t channel = 0; // Canal a escanear (0 son todos)
+	uint8_t rssi_policy = 0; // Política de RSSI a devolver: 0: primer valor; 1: último valor; 2: promedio
     mac_t * maclist;
 
-    if (lua_gettop(L) >=5){
-       // INI Agregado: nuevo parámetro con número de canal a escanear
+    if (lua_gettop(L) >= 6) {
+       // INI Agregado: nuevos parámetros con número de canal a escanear y política de rssi a devolver
        //     Nota: Al agregar un elemento al tope del stack, a los índices siguientes
        //     se les restó 1 (ahora es de -1 a -5, antes era de -1 a -4)
        if (lua_isnumber(L, -1))
-            channel = lua_tointeger(L, -1);
+            rssi_policy = lua_tointeger(L, -1);
+       if (lua_isnumber(L, -2))
+            channel = lua_tointeger(L, -2);
 #if PRINT_MSJ_WF_RADAR
        if (channel == 0)
             printf("Listen all channels\n");
@@ -400,32 +403,32 @@ static int lwifi_radar(lua_State* L) {
             printf("Listen channel %d\n", channel);
 #endif
        // FIN Agregado
-       luaL_checktype(L, -2, LUA_TBOOLEAN);
-       if (lua_toboolean(L, -2)) {
+       luaL_checktype(L, -3, LUA_TBOOLEAN);
+       if (lua_toboolean(L, -3)) {
             onlyData = 1;
        }
-       if(lua_isnumber(L, -3)){
-	       rssi=lua_tointeger(L,-3);
+       if(lua_isnumber(L, -4)){
+	       rssi=lua_tointeger(L,-4);
 #if PRINT_MSJ_WF_RADAR
 	       printf("Minimum rssi: %d \n",rssi);
 #endif
        }
-       if(lua_isnumber(L, -4)){
-	       segs=lua_tointeger(L,-4);
+       if(lua_isnumber(L, -5)){
+	       segs=lua_tointeger(L,-5);
 #if PRINT_MSJ_WF_RADAR
 	       printf("Seconds per channel: %d\n",segs) ;
 #endif
        }
-       luaL_checktype(L, -5, LUA_TBOOLEAN);
-       if (lua_toboolean(L, -5)) {
+       luaL_checktype(L, -6, LUA_TBOOLEAN);
+       if (lua_toboolean(L, -6)) {
             table = 1;
        }
     } 
     else {
-		return luaL_error(L, "syntax is radar(returnTable,listening seconds per channel,min rssi,onlyDataPackets,channel number)");
+		return luaL_error(L, "syntax is radar(returnTable, listening seconds per channel, min rssi, onlyDataPackets, channel number, rssi policy)");
     }
     // Scan wifi
-    if ((error = wifi_radar(&rssi, &maclist,&count,segs,onlyData,channel))) {
+    if ((error = wifi_radar(&rssi, &maclist, &count, segs, onlyData, channel, rssi_policy))) {
         return luaL_driver_error(L, error);
     }
 #if PRINT_MSJ_WF_RADAR
